@@ -1,0 +1,1093 @@
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+import { useParams } from 'next/navigation'
+import Image from 'next/image'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { 
+  ArrowLeft,
+  Camera,
+  FileImage,
+  MessageSquare,
+  Users,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  RefreshCw,
+  Download,
+  Upload,
+  Eye,
+  FileText,
+  Save,
+} from 'lucide-react'
+import Link from 'next/link'
+
+interface ReviewSession {
+  id: string
+  session_name: string
+  factory_name: string
+  scheduled_date: string
+  status: 'scheduled' | 'in_progress' | 'completed' | 'on_hold'
+  prototype_count: number
+  reviewed_count: number
+  approved_count: number
+  rejected_count: number
+  session_notes: string
+  participants: Participant[]
+}
+
+interface Participant {
+  id: string
+  user_id: string
+  name: string
+  role: string
+  company: string
+  can_approve: boolean
+}
+
+interface ReviewNote {
+  id: string
+  content: string
+  status: 'in_progress' | 'cant_complete' | 'updated_on_drawing' | 'approved'
+  status_reason?: string
+  photos: string[]
+  created_by: string
+  created_by_name: string
+  created_at: string
+  updated_at: string
+}
+
+interface ShopDrawing {
+  id: string
+  file_name: string
+  file_url: string
+  version: number
+  is_current: boolean
+  notes: string
+  created_by_name: string
+  created_at: string
+}
+
+export default function SessionDetailPage() {
+  const params = useParams()
+  const sessionId = params?.id as string
+  
+  const [session, setSession] = useState<ReviewSession | null>(null)
+  const [notes, setNotes] = useState<ReviewNote[]>([])
+  const [shopDrawings, setShopDrawings] = useState<ShopDrawing[]>([])
+  const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState('overview')
+  
+  // New note form
+  const [newNote, setNewNote] = useState('')
+  const [newNoteStatus, setNewNoteStatus] = useState<ReviewNote['status']>('in_progress')
+  const [newNoteStatusReason, setNewNoteStatusReason] = useState('')
+  const [uploadedPhotos, setUploadedPhotos] = useState<File[]>([])
+  
+  // Shop drawing upload
+  const [drawingFile, setDrawingFile] = useState<File | null>(null)
+  const [drawingNotes, setDrawingNotes] = useState('')
+
+  const loadSessionData = useCallback(async () => {
+    setLoading(true)
+    try {
+      // Load session details
+      const sessionResponse = await fetch(`/api/factory-reviews/sessions/${sessionId}`)
+      if (sessionResponse.ok) {
+        const sessionData = await sessionResponse.json()
+        setSession(sessionData)
+      }
+
+      // Load participants
+      const participantsResponse = await fetch(`/api/factory-reviews/sessions/${sessionId}/participants`)
+      if (participantsResponse.ok) {
+        const participantsData = await participantsResponse.json()
+        setSession(prev => prev ? { ...prev, participants: participantsData } : null)
+      }
+
+      // Load notes
+      const notesResponse = await fetch(`/api/factory-reviews/sessions/${sessionId}/notes`)
+      if (notesResponse.ok) {
+        const notesData = await notesResponse.json()
+        setNotes(notesData)
+      }
+
+      // Load shop drawings
+      const drawingsResponse = await fetch(`/api/factory-reviews/sessions/${sessionId}/shop-drawings`)
+      if (drawingsResponse.ok) {
+        const drawingsData = await drawingsResponse.json()
+        setShopDrawings(drawingsData)
+      }
+    } catch (error) {
+      console.error('Error loading session data:', error)
+    } finally {
+      setLoading(false)
+    }
+  }, [sessionId])
+
+  useEffect(() => {
+    if (sessionId) {
+      loadSessionData()
+    }
+  }, [sessionId, loadSessionData])
+
+  const handleAddNote = async () => {
+    if (!newNote.trim()) return
+
+    try {
+      const formData = new FormData()
+      formData.append('content', newNote)
+      formData.append('status', newNoteStatus)
+      if (newNoteStatusReason) {
+        formData.append('status_reason', newNoteStatusReason)
+      }
+      
+      uploadedPhotos.forEach((photo) => {
+        formData.append(`photos`, photo)
+      })
+
+      const response = await fetch(`/api/factory-reviews/sessions/${sessionId}/notes`, {
+        method: 'POST',
+        body: formData
+      })
+
+      if (response.ok) {
+        setNewNote('')
+        setNewNoteStatus('in_progress')
+        setNewNoteStatusReason('')
+        setUploadedPhotos([])
+        loadSessionData() // Reload to get updated data
+      } else {
+        const errorData = await response.json()
+        console.error('API error response:', errorData)
+      }
+    } catch (error) {
+      console.error('Error adding note:', error)
+    }
+  }
+
+  const handleUploadShopDrawing = async () => {
+    if (!drawingFile) return
+
+    try {
+      const formData = new FormData()
+      formData.append('file', drawingFile)
+      formData.append('notes', drawingNotes)
+
+      const response = await fetch(`/api/factory-reviews/sessions/${sessionId}/shop-drawings`, {
+        method: 'POST',
+        body: formData
+      })
+
+      if (response.ok) {
+        setDrawingFile(null)
+        setDrawingNotes('')
+        loadSessionData() // Reload to get updated data
+      }
+    } catch (error) {
+      console.error('Error uploading shop drawing:', error)
+    }
+  }
+
+  const handleExportReport = async () => {
+    try {
+      const response = await fetch(`/api/factory-reviews/sessions/${sessionId}/export`, {
+        method: 'GET'
+      })
+
+      if (response.ok) {
+        const blob = await response.blob()
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `factory-review-${session?.session_name || 'report'}-${new Date().toISOString().split('T')[0]}.pdf`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        window.URL.revokeObjectURL(url)
+      }
+    } catch (error) {
+      console.error('Error exporting report:', error)
+    }
+  }
+
+  const handleUpdateSessionStatus = async (newStatus: ReviewSession['status']) => {
+    try {
+      const response = await fetch(`/api/factory-reviews/sessions/${sessionId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ status: newStatus })
+      })
+
+      if (response.ok) {
+        loadSessionData() // Reload to get updated data
+      }
+    } catch (error) {
+      console.error('Error updating session status:', error)
+    }
+  }
+
+  const handleCapturePhoto = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/*'
+    input.capture = 'environment' // Use rear camera on mobile devices
+    input.multiple = true
+    input.onchange = (e) => {
+      const target = e.target as HTMLInputElement
+      if (target.files) {
+        const files = Array.from(target.files)
+        setUploadedPhotos(prev => [...prev, ...files])
+        // Switch to notes tab and scroll to form
+        setActiveTab('notes')
+        setTimeout(() => {
+          document.getElementById('review-note-form')?.scrollIntoView({ behavior: 'smooth' })
+        }, 100)
+      }
+    }
+    input.click()
+  }
+
+  const handleQuickUploadDrawing = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.pdf,.dwg,.dxf,.jpg,.jpeg,.png'
+    input.onchange = (e) => {
+      const target = e.target as HTMLInputElement
+      if (target.files?.[0]) {
+        setDrawingFile(target.files[0])
+        // Switch to drawings tab and scroll to form
+        setActiveTab('drawings')
+        setTimeout(() => {
+          document.getElementById('drawing-upload-form')?.scrollIntoView({ behavior: 'smooth' })
+        }, 100)
+      }
+    }
+    input.click()
+  }
+
+  const handleQuickAddComment = () => {
+    // Switch to notes tab and focus on textarea
+    setActiveTab('notes')
+    setTimeout(() => {
+      const textarea = document.getElementById('review-note-textarea') as HTMLTextAreaElement
+      textarea?.focus()
+      textarea?.scrollIntoView({ behavior: 'smooth' })
+    }, 100)
+  }
+
+  const handleDownloadOfflinePackage = async () => {
+    try {
+      const response = await fetch(`/api/factory-reviews/sessions/${sessionId}/offline-package`, {
+        method: 'GET'
+      })
+
+      if (response.ok) {
+        const blob = await response.blob()
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `factory-review-offline-${session?.session_name?.replace(/[^a-zA-Z0-9]/g, '-') || 'package'}.zip`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        window.URL.revokeObjectURL(url)
+
+        // Update session to mark package as downloaded
+        await fetch(`/api/factory-reviews/sessions/${sessionId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ offline_package_downloaded: true })
+        })
+
+        loadSessionData() // Reload to update the status
+      } else {
+        alert('Failed to generate offline package. Please try again.')
+      }
+    } catch (error) {
+      console.error('Error downloading offline package:', error)
+      alert('Error downloading offline package')
+    }
+  }
+
+  const handleUpdateNoteStatus = async (noteId: string, newStatus: ReviewNote['status'], statusReason?: string) => {
+    try {
+      const response = await fetch(`/api/factory-reviews/sessions/${sessionId}/notes/${noteId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          status: newStatus,
+          status_reason: statusReason
+        })
+      })
+
+      if (response.ok) {
+        loadSessionData() // Reload to get updated data
+      } else {
+        const errorData = await response.json()
+        console.error('API error response:', errorData)
+      }
+    } catch (error) {
+      console.error('Error updating note status:', error)
+    }
+  }
+
+  const downloadImage = async (imageUrl: string, index: number) => {
+    try {
+      const response = await fetch(imageUrl)
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `review-photo-${index + 1}.jpg`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+    } catch (error) {
+      console.error('Error downloading image:', error)
+    }
+  }
+
+  const handlePhotoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files) {
+      const files = Array.from(event.target.files)
+      setUploadedPhotos(prev => [...prev, ...files])
+    }
+  }
+
+  const removePhoto = (index: number) => {
+    setUploadedPhotos(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'scheduled': return 'bg-blue-100 text-blue-800'
+      case 'in_progress': return 'bg-amber-100 text-amber-800'
+      case 'completed': return 'bg-green-100 text-green-800'
+      case 'on_hold': return 'bg-gray-100 text-slate-900'
+      case 'approved': return 'bg-green-100 text-green-800'
+      case 'cant_complete': return 'bg-red-100 text-red-800'
+      case 'updated_on_drawing': return 'bg-blue-100 text-blue-800'
+      default: return 'bg-gray-100 text-slate-900'
+    }
+  }
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'approved': return <CheckCircle2 className="w-4 h-4" />
+      case 'cant_complete': return <XCircle className="w-4 h-4" />
+      case 'updated_on_drawing': return <RefreshCw className="w-4 h-4" />
+      case 'in_progress': return <Clock className="w-4 h-4" />
+      default: return <AlertTriangle className="w-4 h-4" />
+    }
+  }
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
+  }
+
+  if (loading) {
+    return (
+      <div className="p-6">
+        <div className="animate-pulse space-y-6">
+          <div className="h-8 bg-stone-200 rounded w-1/3"></div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="h-40 bg-stone-200 rounded"></div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!session) {
+    return (
+      <div className="p-6">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-slate-900 mb-4">Session Not Found</h1>
+          <p className="text-slate-600 mb-6">The factory review session you&apos;re looking for doesn&apos;t exist.</p>
+          <Link href="/dashboard/factory-reviews">
+            <Button>
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Factory Reviews
+            </Button>
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div className="space-y-1">
+          <div className="flex items-center space-x-3">
+            <Link href="/dashboard/factory-reviews">
+              <Button variant="outline" size="sm">
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back
+              </Button>
+            </Link>
+            <Badge className={getStatusColor(session.status)}>
+              {session.status.replace('_', ' ')}
+            </Badge>
+          </div>
+          <h1 className="text-3xl font-bold text-slate-900">{session.session_name}</h1>
+          <div className="flex items-center space-x-4 text-sm text-slate-600">
+            <span>{session.factory_name}</span>
+            <span>Scheduled: {formatDate(session.scheduled_date)}</span>
+            <span>{session.participants?.length || 0} participants</span>
+          </div>
+        </div>
+        <div className="flex items-center space-x-3">
+          {/* Session Status Actions */}
+          {session.status === 'scheduled' && (
+            <Button onClick={() => handleUpdateSessionStatus('in_progress')}>
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Start Session
+            </Button>
+          )}
+          {session.status === 'in_progress' && (
+            <>
+              <Button onClick={() => handleUpdateSessionStatus('on_hold')} variant="outline">
+                <AlertTriangle className="w-4 h-4 mr-2" />
+                Put On Hold
+              </Button>
+              <Button onClick={() => handleUpdateSessionStatus('completed')}>
+                <CheckCircle2 className="w-4 h-4 mr-2" />
+                Complete Session
+              </Button>
+            </>
+          )}
+          {session.status === 'on_hold' && (
+            <Button onClick={() => handleUpdateSessionStatus('in_progress')}>
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Resume Session
+            </Button>
+          )}
+          {session.status === 'completed' && (
+            <Button onClick={() => handleUpdateSessionStatus('in_progress')} variant="outline">
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Reopen Session
+            </Button>
+          )}
+
+          <Button variant="outline" onClick={loadSessionData}>
+            <RefreshCw className="w-4 h-4 mr-2" />
+            Refresh
+          </Button>
+          <Button variant="outline" onClick={handleExportReport}>
+            <Download className="w-4 h-4 mr-2" />
+            Export Report
+          </Button>
+        </div>
+      </div>
+
+      {/* Progress Overview */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-2xl font-bold text-slate-900">{session.prototype_count}</div>
+                <div className="text-sm text-slate-600">Total Prototypes</div>
+              </div>
+              <FileText className="w-8 h-8 text-blue-600" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-2xl font-bold text-slate-900">{session.reviewed_count}</div>
+                <div className="text-sm text-slate-600">Reviewed</div>
+              </div>
+              <Eye className="w-8 h-8 text-amber-600" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-2xl font-bold text-slate-900">{session.approved_count}</div>
+                <div className="text-sm text-slate-600">Approved</div>
+              </div>
+              <CheckCircle2 className="w-8 h-8 text-green-600" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-2xl font-bold text-slate-900">{session.rejected_count}</div>
+                <div className="text-sm text-slate-600">Need Changes</div>
+              </div>
+              <XCircle className="w-8 h-8 text-red-600" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Main Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="notes">Review Notes</TabsTrigger>
+          <TabsTrigger value="drawings">Shop Drawings</TabsTrigger>
+          <TabsTrigger value="participants">Participants</TabsTrigger>
+        </TabsList>
+
+        {/* Overview Tab */}
+        <TabsContent value="overview" className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Session Info */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Session Information</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium text-slate-600">Session Notes</label>
+                  <p className="text-sm text-slate-600 mt-1">{session.session_notes || 'No notes provided.'}</p>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-600">Progress</span>
+                    <span className="font-medium">
+                      {session.prototype_count > 0 
+                        ? Math.round((session.reviewed_count / session.prototype_count) * 100)
+                        : 0}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div 
+                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                      style={{ 
+                        width: `${session.prototype_count > 0 
+                          ? (session.reviewed_count / session.prototype_count) * 100
+                          : 0}%` 
+                      }}
+                    ></div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Quick Actions */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Quick Actions</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Button className="w-full justify-start" onClick={handleCapturePhoto}>
+                  <Camera className="w-4 h-4 mr-2" />
+                  Capture Review Photo
+                </Button>
+                <Button variant="outline" className="w-full justify-start" onClick={handleQuickUploadDrawing}>
+                  <Upload className="w-4 h-4 mr-2" />
+                  Upload Shop Drawing
+                </Button>
+                <Button variant="outline" className="w-full justify-start" onClick={handleQuickAddComment}>
+                  <MessageSquare className="w-4 h-4 mr-2" />
+                  Add Review Comment
+                </Button>
+                <Button variant="outline" className="w-full justify-start" onClick={handleDownloadOfflinePackage}>
+                  <Download className="w-4 h-4 mr-2" />
+                  Download Offline Package
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Review Notes */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Review Notes</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {notes.map((note) => (
+                  <Card key={note.id}>
+                    <CardContent className="pt-6">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center space-x-2">
+                          <Badge className={getStatusColor(note.status)}>
+                            {getStatusIcon(note.status)}
+                            <span className="ml-1">{note.status.replace('_', ' ')}</span>
+                          </Badge>
+                          <span className="text-sm text-slate-600">{note.created_by_name}</span>
+                          <span className="text-sm text-slate-500">{formatDate(note.created_at)}</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <Select
+                            value={note.status}
+                            onValueChange={(newStatus: ReviewNote['status']) => {
+                              if (newStatus === 'cant_complete') {
+                                const reason = prompt('Please provide a reason why this cannot be completed:')
+                                if (reason) {
+                                  handleUpdateNoteStatus(note.id, newStatus, reason)
+                                }
+                              } else {
+                                handleUpdateNoteStatus(note.id, newStatus)
+                              }
+                            }}
+                          >
+                            <SelectTrigger className="w-[160px] h-8">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="in_progress">In Progress</SelectItem>
+                              <SelectItem value="cant_complete">Cannot Complete</SelectItem>
+                              <SelectItem value="updated_on_drawing">Updated on Drawing</SelectItem>
+                              <SelectItem value="approved">Approved</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <p className="text-slate-900 mb-3">{note.content}</p>
+
+                      {note.status_reason && (
+                        <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 mb-3">
+                          <div className="text-sm">
+                            <strong>Reason:</strong> {note.status_reason}
+                          </div>
+                        </div>
+                      )}
+
+                      {note.photos && note.photos.length > 0 && (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-sm font-medium text-slate-600">
+                              Attached Photos ({note.photos.length})
+                            </h4>
+                          </div>
+                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                            {note.photos.map((photo, index) => (
+                              <div key={index} className="relative group">
+                                <Image
+                                  src={photo}
+                                  alt={`Review photo ${index + 1}`}
+                                  width={200}
+                                  height={128}
+                                  className="w-full h-32 object-cover rounded-lg border cursor-pointer hover:opacity-90 transition-opacity"
+                                  onClick={() => window.open(photo, '_blank')}
+                                />
+                                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-200 rounded-lg flex items-center justify-center">
+                                  <div className="opacity-0 group-hover:opacity-100 flex space-x-2">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 w-8 p-0"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        window.open(photo, '_blank')
+                                      }}
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 w-8 p-0"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        downloadImage(photo, index)
+                                      }}
+                                    >
+                                      <Download className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+
+                {notes.length === 0 && (
+                  <Card>
+                    <CardContent className="pt-12 pb-12 text-center">
+                      <MessageSquare className="w-12 h-12 text-slate-500 mx-auto mb-4" />
+                      <p className="text-slate-600">No review notes yet</p>
+                      <p className="text-slate-600">Add your first review comment using the quick actions above</p>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Review Notes Tab */}
+        <TabsContent value="notes" className="space-y-6">
+          {/* Add New Note */}
+          <Card id="review-note-form">
+            <CardHeader>
+              <CardTitle>Add Review Note</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Textarea
+                id="review-note-textarea"
+                placeholder="Enter your review comments, observations, or requested changes..."
+                value={newNote}
+                onChange={(e) => setNewNote(e.target.value)}
+                className="min-h-[100px]"
+              />
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-slate-600">Status</label>
+                  <Select value={newNoteStatus} onValueChange={(value: ReviewNote['status']) => setNewNoteStatus(value)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="in_progress">In Progress</SelectItem>
+                      <SelectItem value="cant_complete">Cannot Complete</SelectItem>
+                      <SelectItem value="updated_on_drawing">Updated on Drawing</SelectItem>
+                      <SelectItem value="approved">Approved</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                {newNoteStatus === 'cant_complete' && (
+                  <div>
+                    <label className="text-sm font-medium text-slate-600">Reason</label>
+                    <Input
+                      placeholder="Explain why this cannot be completed..."
+                      value={newNoteStatusReason}
+                      onChange={(e) => setNewNoteStatusReason(e.target.value)}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Photo Upload */}
+              <div>
+                <label className="text-sm font-medium text-slate-600">Photos</label>
+                <div className="mt-2 space-y-2">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handlePhotoUpload}
+                    className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                  />
+                  {uploadedPhotos.length > 0 && (
+                    <div className="grid grid-cols-3 gap-2">
+                      {uploadedPhotos.map((photo, index) => (
+                        <div key={index} className="relative">
+                          <Image
+                            src={URL.createObjectURL(photo)}
+                            alt={`Upload ${index + 1}`}
+                            width={100}
+                            height={80}
+                            className="w-full h-20 object-cover rounded border"
+                          />
+                          <button
+                            onClick={() => removePhoto(index)}
+                            className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <Button onClick={handleAddNote} className="w-full">
+                <Save className="w-4 h-4 mr-2" />
+                Add Review Note
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Existing Notes */}
+          <div className="space-y-4">
+            {notes.map((note) => (
+              <Card key={note.id}>
+                <CardContent className="pt-6">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center space-x-2">
+                      <Badge className={getStatusColor(note.status)}>
+                        {getStatusIcon(note.status)}
+                        <span className="ml-1">{note.status.replace('_', ' ')}</span>
+                      </Badge>
+                      <span className="text-sm text-slate-600">{note.created_by_name}</span>
+                      <span className="text-sm text-slate-500">{formatDate(note.created_at)}</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Select
+                        value={note.status}
+                        onValueChange={(newStatus: ReviewNote['status']) => {
+                          if (newStatus === 'cant_complete') {
+                            const reason = prompt('Please provide a reason why this cannot be completed:')
+                            if (reason) {
+                              handleUpdateNoteStatus(note.id, newStatus, reason)
+                            }
+                          } else {
+                            handleUpdateNoteStatus(note.id, newStatus)
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="w-[160px] h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="in_progress">In Progress</SelectItem>
+                          <SelectItem value="cant_complete">Cannot Complete</SelectItem>
+                          <SelectItem value="updated_on_drawing">Updated on Drawing</SelectItem>
+                          <SelectItem value="approved">Approved</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <p className="text-slate-900 mb-3">{note.content}</p>
+
+                  {note.status_reason && (
+                    <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 mb-3">
+                      <div className="text-sm">
+                        <strong>Reason:</strong> {note.status_reason}
+                      </div>
+                    </div>
+                  )}
+
+                  {note.photos && note.photos.length > 0 && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-medium text-slate-600">
+                          Attached Photos ({note.photos.length})
+                        </h4>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                        {note.photos.map((photo, index) => (
+                          <div key={index} className="relative group">
+                            <Image
+                              src={photo}
+                              alt={`Review photo ${index + 1}`}
+                              width={200}
+                              height={128}
+                              className="w-full h-32 object-cover rounded-lg border cursor-pointer hover:opacity-90 transition-opacity"
+                              onClick={() => window.open(photo, '_blank')}
+                            />
+                            <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-200 rounded-lg flex items-center justify-center">
+                              <div className="opacity-0 group-hover:opacity-100 flex space-x-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 w-8 p-0"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    window.open(photo, '_blank')
+                                  }}
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 w-8 p-0"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    downloadImage(photo, index)
+                                  }}
+                                >
+                                  <Download className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+
+            {notes.length === 0 && (
+              <Card>
+                <CardContent className="pt-12 pb-12 text-center">
+                  <MessageSquare className="w-16 h-16 text-slate-500 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-slate-900 mb-2">No review notes yet</h3>
+                  <p className="text-slate-600">Add your first review comment using the form above</p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* Shop Drawings Tab */}
+        <TabsContent value="drawings" className="space-y-6">
+          {/* Upload New Drawing */}
+          <Card id="drawing-upload-form">
+            <CardHeader>
+              <CardTitle>Upload Shop Drawing</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-slate-600">Drawing File</label>
+                <input
+                  type="file"
+                  accept=".pdf,.dwg,.dxf,.jpg,.jpeg,.png"
+                  onChange={(e) => setDrawingFile(e.target.files?.[0] || null)}
+                  className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Accepted formats: PDF, DWG, DXF, JPG, PNG
+                </p>
+              </div>
+              
+              <div>
+                <label className="text-sm font-medium text-slate-600">Notes</label>
+                <Textarea
+                  placeholder="Add notes about this drawing version..."
+                  value={drawingNotes}
+                  onChange={(e) => setDrawingNotes(e.target.value)}
+                />
+              </div>
+
+              <Button onClick={handleUploadShopDrawing} disabled={!drawingFile}>
+                <Upload className="w-4 h-4 mr-2" />
+                Upload Drawing
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Existing Drawings */}
+          <div className="space-y-4">
+            {shopDrawings.map((drawing) => (
+              <Card key={drawing.id} className={drawing.is_current ? 'border-green-500' : ''}>
+                <CardContent className="pt-6">
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <h3 className="text-lg font-medium text-slate-900">{drawing.file_name}</h3>
+                        {drawing.is_current && (
+                          <Badge className="bg-green-100 text-green-800">Current Version</Badge>
+                        )}
+                        <Badge variant="outline">v{drawing.version}</Badge>
+                      </div>
+                      
+                      {drawing.notes && (
+                        <p className="text-sm text-slate-600">{drawing.notes}</p>
+                      )}
+                      
+                      <div className="text-xs text-slate-500">
+                        Uploaded by {drawing.created_by_name} on {formatDate(drawing.created_at)}
+                      </div>
+                    </div>
+                    
+                    <div className="flex space-x-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => window.open(drawing.file_url, '_blank')}
+                      >
+                        <Eye className="w-4 h-4 mr-2" />
+                        View
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const link = document.createElement('a');
+                          link.href = drawing.file_url;
+                          link.download = drawing.file_name;
+                          link.click();
+                        }}
+                      >
+                        <Download className="w-4 h-4 mr-2" />
+                        Download
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+
+            {shopDrawings.length === 0 && (
+              <Card>
+                <CardContent className="pt-12 pb-12 text-center">
+                  <FileImage className="w-16 h-16 text-slate-500 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-slate-900 mb-2">No shop drawings uploaded</h3>
+                  <p className="text-slate-600">Upload the first shop drawing using the form above</p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* Participants Tab */}
+        <TabsContent value="participants" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Session Participants</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {session.participants && session.participants.length > 0 ? (
+                <div className="space-y-3">
+                  {session.participants.map((participant) => (
+                    <div key={participant.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <div>
+                        <div className="font-medium text-slate-900">{participant.name}</div>
+                        <div className="text-sm text-slate-600">{participant.role} at {participant.company}</div>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        {participant.can_approve && (
+                          <Badge className="bg-green-100 text-green-800">Can Approve</Badge>
+                        )}
+                        <Badge variant="outline">{participant.company}</Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <Users className="w-16 h-16 text-slate-500 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-slate-900 mb-2">No participants added</h3>
+                  <p className="text-slate-600">Participants will be added to this session</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}

@@ -1,0 +1,477 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { PageHeader } from '@/components/ui/page-header'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import { Search, Plus, Lightbulb, Settings, ArrowRight } from 'lucide-react'
+
+interface Collection {
+  id: string
+  name: string
+  prefix: string
+}
+
+interface Item {
+  id: string
+  name: string
+  sku_base: string
+  type: 'Concept' | 'Prototype' | 'Production Ready'
+  collection_id: string
+  collections?: Collection
+  description?: string
+  base_price: number
+  is_active: boolean
+  created_at: string
+  project_manager?: string
+}
+
+export default function ConceptItemsPage() {
+  const router = useRouter()
+  const [items, setItems] = useState<Item[]>([])
+  const [collections, setCollections] = useState<Collection[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [searchTerm, setSearchTerm] = useState('')
+  const [selectedCollection, setSelectedCollection] = useState('all')
+  const [showCreateForm, setShowCreateForm] = useState(false)
+
+  // Create form state
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    collection_id: '',
+    base_price: '',
+    type: 'Concept' as const,
+    project_manager: ''
+  })
+
+  useEffect(() => {
+    Promise.all([
+      fetchItems(),
+      fetchCollections()
+    ])
+  }, [])
+
+  const fetchItems = async () => {
+    try {
+      setLoading(true)
+      // Filter items with type 'Concept'
+      const response = await fetch('/api/items?type=Concept')
+      if (!response.ok) throw new Error('Failed to fetch items')
+
+      const data = await response.json()
+      setItems(data.data || [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load items')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchCollections = async () => {
+    try {
+      const response = await fetch('/api/collections')
+      if (!response.ok) throw new Error('Failed to fetch collections')
+
+      const data = await response.json()
+      setCollections(data.data || [])
+    } catch (err) {
+      console.error('Error fetching collections:', err)
+    }
+  }
+
+  const handleCreateItem = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      // Generate proper SKU using collection prefix
+      const collection = collections.find(c => c.id === formData.collection_id)
+      const createSKUCode = (text: string, fallback = 'UNK'): string => {
+        if (!text || typeof text !== 'string') return fallback
+        return text.trim().substring(0, 3).toUpperCase() || fallback
+      }
+
+      const collectionCode = collection?.prefix || createSKUCode(collection?.name || 'CONCEPT', 'CON')
+      const itemCode = createSKUCode(formData.name, 'ITM')
+      const timestamp = Date.now().toString().slice(-3)
+      const sku_base = `${collectionCode}-${itemCode}-${timestamp}`
+
+      const dataToSend = {
+        ...formData,
+        sku_base,
+        base_price: parseFloat(formData.base_price) || 0
+      }
+
+      console.log('Creating concept item with data:', dataToSend)
+
+      const response = await fetch('/api/items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dataToSend)
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        console.error('API Error:', errorData)
+        throw new Error(errorData.error || 'Failed to create item')
+      }
+
+      const result = await response.json()
+      console.log('Successfully created concept item:', result)
+
+      setShowCreateForm(false)
+      setFormData({
+        name: '',
+        description: '',
+        collection_id: '',
+        base_price: '',
+        type: 'Concept',
+        project_manager: ''
+      })
+      setError('') // Clear any previous errors
+      await fetchItems()
+    } catch (err) {
+      console.error('Error creating concept item:', err)
+      setError(err instanceof Error ? err.message : 'Failed to create item')
+    }
+  }
+
+  const promoteToPrototype = async (itemId: string) => {
+    try {
+      const response = await fetch(`/api/items/${itemId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'Prototype' })
+      })
+
+      if (!response.ok) throw new Error('Failed to promote item')
+
+      await fetchItems() // Refresh the list
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to promote item')
+    }
+  }
+
+  const updateItemType = async (itemId: string, newType: string) => {
+    try {
+      const response = await fetch(`/api/items/${itemId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: newType })
+      })
+
+      if (!response.ok) throw new Error('Failed to update item type')
+
+      // Refresh the list to remove the item (since it no longer belongs on this page)
+      await fetchItems()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update item type')
+    }
+  }
+
+  const filteredItems = items.filter(item => {
+    const matchesCollection = selectedCollection === 'all' || item.collection_id === selectedCollection
+    const matchesSearch = searchTerm === '' ||
+      (item.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (item.sku_base || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (item.collections?.name || "").toLowerCase().includes(searchTerm.toLowerCase())
+
+    return matchesCollection && matchesSearch
+  })
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Concept Items"
+        description="Early-stage product concepts and ideas for development"
+      />
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-600">
+              Total Concepts
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-purple-600">
+              {items.length}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-600">
+              By Collection
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-indigo-600">
+              {[...new Set(items.map(i => i.collection_id))].length}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-600">
+              This Month
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">
+              {items.filter(i => {
+                const created = new Date(i.created_at)
+                const now = new Date()
+                return created.getMonth() === now.getMonth() && created.getFullYear() === now.getFullYear()
+              }).length}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-600">
+              Ready to Promote
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">
+              {items.filter(i => i.description && i.base_price > 0).length}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Controls */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="flex flex-col md:flex-row gap-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 h-4 w-4" />
+            <Input
+              placeholder="Search concept items..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 w-full md:w-80"
+            />
+          </div>
+
+          <Select value={selectedCollection} onValueChange={setSelectedCollection}>
+            <SelectTrigger className="w-full md:w-48">
+              <SelectValue placeholder="Filter by collection" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Collections</SelectItem>
+              {collections.map(collection => (
+                <SelectItem key={collection.id} value={collection.id}>{collection.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <Button
+          onClick={() => setShowCreateForm(true)}
+          className="bg-purple-600 hover:bg-purple-700"
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Add Concept Item
+        </Button>
+      </div>
+
+      {/* Items Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Lightbulb className="h-5 w-5" />
+            Concept Items ({filteredItems.length})
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <div>Loading concept items...</div>
+            </div>
+          ) : error ? (
+            <div className="text-center py-8 text-red-500">
+              Error: {error}
+            </div>
+          ) : filteredItems.length === 0 ? (
+            <div className="text-center py-8 text-slate-500">
+              No concept items found. Add your first product concept!
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>SKU</TableHead>
+                  <TableHead>Collection</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Price</TableHead>
+                  <TableHead>Manager</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead className="w-24">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredItems.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell>
+                      <div>
+                        <div className="font-medium">{item.name}</div>
+                        {item.description && (
+                          <div className="text-sm text-slate-500 mt-1">{item.description}</div>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <span className="font-mono text-sm">{item.sku_base}</span>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{item.collections?.name}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Select
+                        value={item.type || 'Concept'}
+                        onValueChange={(newType) => updateItemType(item.id, newType)}
+                      >
+                        <SelectTrigger className="w-32">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Concept">Concept</SelectItem>
+                          <SelectItem value="Prototype">Prototype</SelectItem>
+                          <SelectItem value="Production Ready">Production Ready</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>${item.base_price?.toFixed(2) || '0.00'}</TableCell>
+                    <TableCell>{item.project_manager || '-'}</TableCell>
+                    <TableCell>
+                      {new Date(item.created_at).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => router.push(`/dashboard/items/${item.id}`)}
+                        >
+                          <Settings className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => promoteToPrototype(item.id)}
+                          className="text-green-600 hover:text-green-700 hover:border-green-300"
+                          title="Promote to Prototype"
+                        >
+                          <ArrowRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Create Form Modal */}
+      {showCreateForm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <Card className="max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <CardHeader>
+              <CardTitle>Add New Concept Item</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleCreateItem} className="space-y-4">
+                <div>
+                  <Label htmlFor="name">Name *</Label>
+                  <Input
+                    id="name"
+                    value={formData.name}
+                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="collection_id">Collection *</Label>
+                  <Select
+                    value={formData.collection_id}
+                    onValueChange={(value) => setFormData({...formData, collection_id: value})}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select collection" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {collections.map(collection => (
+                        <SelectItem key={collection.id} value={collection.id}>
+                          {collection.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label htmlFor="description">Description</Label>
+                  <Input
+                    id="description"
+                    value={formData.description}
+                    onChange={(e) => setFormData({...formData, description: e.target.value})}
+                    placeholder="Describe your concept idea..."
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="base_price">Estimated Price</Label>
+                  <Input
+                    id="base_price"
+                    type="number"
+                    step="0.01"
+                    value={formData.base_price}
+                    onChange={(e) => setFormData({...formData, base_price: e.target.value})}
+                    placeholder="0.00"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="project_manager">Project Manager</Label>
+                  <Input
+                    id="project_manager"
+                    value={formData.project_manager}
+                    onChange={(e) => setFormData({...formData, project_manager: e.target.value})}
+                  />
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowCreateForm(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" className="bg-purple-600 hover:bg-purple-700">
+                    Create Concept Item
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </div>
+  )
+}

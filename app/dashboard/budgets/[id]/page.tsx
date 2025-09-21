@@ -1,0 +1,516 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { LoadingSpinner } from '@/components/ui/loading-spinner'
+import { Alert } from '@/components/ui/alert'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { 
+  ArrowLeft,
+  Plus, 
+  DollarSign, 
+  TrendingUp, 
+  TrendingDown,
+  AlertTriangle,
+  CheckCircle,
+  Calendar,
+  FileText,
+  Edit
+} from 'lucide-react'
+import { safeFormatString } from '@/lib/utils/string-helpers'
+import Link from 'next/link'
+
+interface BudgetTransaction {
+  id: string
+  date: string
+  description: string
+  amount: number
+  category: string
+  user_email?: string
+  reference?: string
+  type: 'expense' | 'allocation' | 'adjustment'
+}
+
+interface BudgetDetail {
+  id: string
+  name: string
+  category: string
+  department: string
+  period_name: string
+  budget_amount: number
+  actual_amount: number
+  remaining: number
+  variance: number
+  variance_percentage: number
+  status: 'on_track' | 'at_risk' | 'over_budget'
+  created_at: string
+  transactions: BudgetTransaction[]
+  forecast: {
+    current_run_rate: number
+    projected_end_amount: number
+    days_remaining: number
+    recommended_actions: string[]
+  }
+}
+
+interface BudgetDetailPageProps {
+  params: Promise<{ id: string }>
+}
+
+export default function BudgetDetailPage({ params }: BudgetDetailPageProps) {
+  const [budget, setBudget] = useState<BudgetDetail | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [showAddTransaction, setShowAddTransaction] = useState(false)
+  const [transactionForm, setTransactionForm] = useState({
+    description: '',
+    amount: 0,
+    category: ''
+  })
+  const [submitting, setSubmitting] = useState(false)
+
+
+  useEffect(() => {
+    const loadBudgetDetail = async () => {
+      try {
+        const resolvedParams = await params
+        const budgetId = resolvedParams.id
+        
+        const response = await fetch(`/api/budgets/${budgetId}/transactions`)
+        if (!response.ok) {
+          throw new Error('Failed to load budget details')
+        }
+
+        const data = await response.json()
+        setBudget(data)
+      } catch (err) {
+        console.error('Error loading budget detail:', err)
+        setError(err instanceof Error ? err.message : 'Failed to load budget details')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadBudgetDetail()
+  }, [params])
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount)
+  }
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    })
+  }
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'on_track':
+        return 'bg-green-100 text-green-800'
+      case 'at_risk':
+        return 'bg-yellow-100 text-yellow-800'
+      case 'over_budget':
+        return 'bg-red-100 text-red-800'
+      default:
+        return 'bg-gray-100 text-slate-900'
+    }
+  }
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'on_track':
+        return <CheckCircle className="w-4 h-4" />
+      case 'at_risk':
+      case 'over_budget':
+        return <AlertTriangle className="w-4 h-4" />
+      default:
+        return null
+    }
+  }
+
+  const handleAddTransaction = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!budget) return
+
+    try {
+      setSubmitting(true)
+      const response = await fetch(`/api/budgets/${budget.id}/transactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(transactionForm)
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to add transaction')
+      }
+
+      // Reload budget data
+      const budgetResponse = await fetch(`/api/budgets/${budget.id}/transactions`)
+      if (budgetResponse.ok) {
+        const updatedBudget = await budgetResponse.json()
+        setBudget(updatedBudget)
+      }
+
+      // Reset form and close modal
+      setTransactionForm({ description: '', amount: 0, category: '' })
+      setShowAddTransaction(false)
+    } catch (err) {
+      console.error('Error adding transaction:', err)
+      setError(err instanceof Error ? err.message : 'Failed to add transaction')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center space-x-4">
+          <Link href="/dashboard/budgets">
+            <Button variant="ghost" size="sm">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Budgets
+            </Button>
+          </Link>
+        </div>
+        <div className="flex items-center justify-center py-12">
+          <LoadingSpinner size="lg" />
+        </div>
+      </div>
+    )
+  }
+
+  if (error || !budget) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center space-x-4">
+          <Link href="/dashboard/budgets">
+            <Button variant="ghost" size="sm">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Budgets
+            </Button>
+          </Link>
+        </div>
+        <Alert variant="error">
+          <AlertTriangle className="h-4 w-4" />
+          <span>{error || 'Budget not found'}</span>
+        </Alert>
+      </div>
+    )
+  }
+
+  const progressPercentage = budget.budget_amount > 0 
+    ? Math.min(100, Math.max(0, (budget.actual_amount / budget.budget_amount) * 100))
+    : 0
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-4">
+          <Link href="/dashboard/budgets">
+            <Button variant="ghost" size="sm">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Budgets
+            </Button>
+          </Link>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">{budget.name}</h1>
+            <p className="text-slate-600">{budget.category} • {budget.period_name}</p>
+          </div>
+        </div>
+        <div className="flex items-center space-x-2">
+          <Badge className={getStatusColor(budget.status)} variant="outline">
+            {getStatusIcon(budget.status)}
+            <span className="ml-1 capitalize">{safeFormatString(budget.status, 'pending')}</span>
+          </Badge>
+          <Button size="sm">
+            <Edit className="w-4 h-4 mr-2" />
+            Edit Budget
+          </Button>
+        </div>
+      </div>
+
+      {/* Budget Overview Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Budget Amount</CardTitle>
+            <DollarSign className="h-4 w-4 text-slate-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{formatCurrency(budget.budget_amount)}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Actual Spent</CardTitle>
+            <TrendingUp className="h-4 w-4 text-slate-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{formatCurrency(budget.actual_amount)}</div>
+            <div className="text-xs text-slate-500">
+              {progressPercentage.toFixed(1)}% of budget
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Remaining</CardTitle>
+            <Calendar className="h-4 w-4 text-slate-500" />
+          </CardHeader>
+          <CardContent>
+            <div className={`text-2xl font-bold ${
+              budget.remaining >= 0 ? 'text-green-600' : 'text-red-600'
+            }`}>
+              {formatCurrency(Math.abs(budget.remaining))}
+            </div>
+            <div className="text-xs text-slate-500">
+              {budget.forecast.days_remaining} days left
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Variance</CardTitle>
+            {budget.variance >= 0 ? 
+              <TrendingUp className="h-4 w-4 text-red-500" /> : 
+              <TrendingDown className="h-4 w-4 text-green-500" />
+            }
+          </CardHeader>
+          <CardContent>
+            <div className={`text-2xl font-bold ${
+              budget.variance >= 0 ? 'text-red-600' : 'text-green-600'
+            }`}>
+              {budget.variance >= 0 ? '+' : ''}{formatCurrency(Math.abs(budget.variance))}
+            </div>
+            <div className={`text-xs ${
+              budget.variance >= 0 ? 'text-red-500' : 'text-green-500'
+            }`}>
+              {budget.variance >= 0 ? '+' : ''}{budget.variance_percentage.toFixed(1)}%
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Progress Bar */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Budget Progress</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-slate-600">Progress</span>
+              <span className="font-medium">{progressPercentage.toFixed(1)}%</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-3">
+              <div 
+                className={`h-3 rounded-full transition-all ${
+                  progressPercentage >= 100 ? 'bg-red-500' :
+                  progressPercentage >= 90 ? 'bg-yellow-500' :
+                  progressPercentage >= 70 ? 'bg-yellow-400' : 'bg-green-500'
+                }`}
+                style={{ width: `${Math.min(100, progressPercentage)}%` }}
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Forecast and Recommendations */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Forecast</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-slate-600">Current Run Rate</span>
+              <span className="font-medium">{formatCurrency(budget.forecast.current_run_rate)}/day</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-slate-600">Projected End Amount</span>
+              <span className={`font-medium ${
+                budget.forecast.projected_end_amount > budget.budget_amount 
+                  ? 'text-red-600' 
+                  : 'text-green-600'
+              }`}>
+                {formatCurrency(budget.forecast.projected_end_amount)}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-slate-600">Days Remaining</span>
+              <span className="font-medium">{budget.forecast.days_remaining}</span>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Recommended Actions</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {(budget.forecast.recommended_actions || []).map((action, index) => (
+                <div key={index} className="flex items-start space-x-3 p-3 bg-blue-50 rounded-lg">
+                  <div className="flex-shrink-0 w-6 h-6 bg-blue-200 rounded-full flex items-center justify-center text-xs font-medium text-blue-800">
+                    {index + 1}
+                  </div>
+                  <p className="text-sm text-slate-600">{action}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Transactions */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-lg">Transactions</CardTitle>
+          <Button size="sm" onClick={() => setShowAddTransaction(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            Add Transaction
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {(budget.transactions || []).length === 0 ? (
+            <div className="text-center py-8 text-slate-500">
+              <FileText className="w-12 h-12 mx-auto mb-4 text-slate-500" />
+              <p className="text-lg mb-2">No transactions yet</p>
+              <p className="text-sm mb-4">Add your first transaction to start tracking expenses</p>
+              <Button size="sm" onClick={() => setShowAddTransaction(true)}>
+                <Plus className="w-4 h-4 mr-2" />
+                Add Transaction
+              </Button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead>Reference</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(budget.transactions || []).map((transaction) => (
+                    <TableRow key={transaction.id}>
+                      <TableCell>{formatDate(transaction.date)}</TableCell>
+                      <TableCell className="font-medium">
+                        {transaction.description}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{transaction.category}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-medium">
+                        {formatCurrency(transaction.amount)}
+                      </TableCell>
+                      <TableCell className="text-sm text-slate-600">
+                        {transaction.reference || transaction.user_email}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Add Transaction Modal */}
+      <Dialog open={showAddTransaction} onOpenChange={setShowAddTransaction}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Transaction</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleAddTransaction} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="description">Description *</Label>
+              <Input
+                id="description"
+                value={transactionForm.description}
+                onChange={(e) => setTransactionForm(prev => ({
+                  ...prev,
+                  description: e.target.value
+                }))}
+                placeholder="Enter transaction description"
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="amount">Amount *</Label>
+              <Input
+                id="amount"
+                type="number"
+                min="0"
+                step="0.01"
+                value={transactionForm.amount || ''}
+                onChange={(e) => setTransactionForm(prev => ({
+                  ...prev,
+                  amount: parseFloat(e.target.value) || 0
+                }))}
+                placeholder="0.00"
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="category">Category</Label>
+              <Input
+                id="category"
+                value={transactionForm.category}
+                onChange={(e) => setTransactionForm(prev => ({
+                  ...prev,
+                  category: e.target.value
+                }))}
+                placeholder={budget.category}
+              />
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-4">
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => setShowAddTransaction(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={submitting}>
+                {submitting ? (
+                  <>
+                    <LoadingSpinner size="sm" className="mr-2" />
+                    Adding...
+                  </>
+                ) : (
+                  'Add Transaction'
+                )}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}

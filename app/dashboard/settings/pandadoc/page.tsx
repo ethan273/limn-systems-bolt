@@ -1,0 +1,292 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { Settings, Key, FileText, TestTube, CheckCircle, XCircle, AlertCircle, Copy, Eye, EyeOff } from 'lucide-react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+
+export default function PandaDocSettingsPage() {
+  const [config, setConfig] = useState({
+    apiKey: '',
+    invoiceTemplateId: '',
+    ndaTemplateId: '',
+    msaTemplateId: '',
+    webhookUrl: ''
+  })
+  
+  const [showApiKey, setShowApiKey] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{status: 'success' | 'error' | null, message: string}>({status: null, message: ''})
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    loadCurrentConfig()
+  }, [])
+
+  const loadCurrentConfig = async () => {
+    try {
+      const response = await fetch('/api/admin/pandadoc-config')
+      if (response.ok) {
+        const data = await response.json()
+        setConfig(data.config || {})
+      }
+    } catch (error) {
+      console.error('Error loading config:', error)
+    }
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setSaved(false)
+    
+    try {
+      const response = await fetch('/api/admin/pandadoc-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+      })
+
+      if (response.ok) {
+        setSaved(true)
+        setTimeout(() => setSaved(false), 3000)
+      } else {
+        throw new Error('Failed to save configuration')
+      }
+    } catch (error) {
+      console.error('Error saving config:', error)
+      alert('Failed to save configuration')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const testConnection = async () => {
+    if (!config.apiKey) {
+      setTestResult({status: 'error', message: 'Please enter your API key first'})
+      return
+    }
+
+    setTesting(true)
+    setTestResult({status: null, message: ''})
+
+    try {
+      const response = await fetch('/api/admin/test-pandadoc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: config.apiKey })
+      })
+
+      const result = await response.json()
+      
+      if (response.ok) {
+        setTestResult({
+          status: 'success', 
+          message: `✅ Connection successful! Found ${result.templateCount} templates.`
+        })
+      } else {
+        setTestResult({
+          status: 'error',
+          message: `❌ Connection failed: ${result.error}`
+        })
+      }
+    } catch (error) {
+      setTestResult({
+        status: 'error',
+        message: `❌ Connection failed: ${error}`
+      })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const copyWebhookUrl = () => {
+    const webhookUrl = `${window.location.origin}/api/pandadoc/webhook`
+    navigator.clipboard.writeText(webhookUrl)
+    alert('Webhook URL copied to clipboard!')
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* Header */}
+      <div>
+        <h1 className="text-4xl font-bold text-slate-900 mb-2">
+          PandaDoc Configuration
+        </h1>
+        <p className="text-slate-600 text-lg">
+          Set up your PandaDoc integration in just a few clicks - no terminal required!
+        </p>
+      </div>
+
+      {/* Quick Setup Guide */}
+      <Card className="border-blue-200 bg-blue-50">
+        <CardHeader>
+          <CardTitle className="flex items-center text-blue-800">
+            <AlertCircle className="w-5 h-5 mr-2" />
+            Quick Setup Guide
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="text-blue-700">
+          <ol className="list-decimal list-inside space-y-2">
+            <li>Get your API key from <a href="https://app.pandadoc.com/a/#/settings/integrations/api" target="_blank" className="underline font-medium">PandaDoc Settings → API</a></li>
+            <li>Paste it in the API Key field below</li>
+            <li>Click &quot;Test Connection&quot; to verify it works</li>
+            <li>Add your template IDs (optional - you can find these in PandaDoc)</li>
+            <li>Click &quot;Save Configuration&quot; and you&apos;re done!</li>
+          </ol>
+        </CardContent>
+      </Card>
+
+      {/* Configuration Form */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center">
+            <Key className="w-5 h-5 mr-2" />
+            API Configuration
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* API Key */}
+          <div className="space-y-2">
+            <Label htmlFor="apiKey">PandaDoc API Key *</Label>
+            <div className="relative">
+              <Input
+                id="apiKey"
+                type={showApiKey ? "text" : "password"}
+                value={config.apiKey}
+                onChange={(e) => setConfig({...config, apiKey: e.target.value})}
+                placeholder="Enter your PandaDoc API key"
+                className="pr-10"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="absolute right-0 top-0 h-full px-3"
+                onClick={() => setShowApiKey(!showApiKey)}
+              >
+                {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </Button>
+            </div>
+            <p className="text-xs text-slate-500">
+              Find this in PandaDoc → Settings → Integrations → API
+            </p>
+          </div>
+
+          {/* Test Connection */}
+          <div className="flex items-center space-x-4">
+            <Button onClick={testConnection} disabled={testing || !config.apiKey}>
+              <TestTube className="w-4 h-4 mr-2" />
+              {testing ? 'Testing...' : 'Test Connection'}
+            </Button>
+            {testResult.status && (
+              <div className={`flex items-center space-x-2 ${testResult.status === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                {testResult.status === 'success' ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                <span className="text-sm">{testResult.message}</span>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Template Configuration */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center">
+            <FileText className="w-5 h-5 mr-2" />
+            Template IDs (Optional)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <p className="text-slate-600">
+            These are optional - if you don&apos;t have specific templates, the system will use defaults.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <Label htmlFor="invoiceTemplate">Invoice Template ID</Label>
+              <Input
+                id="invoiceTemplate"
+                value={config.invoiceTemplateId}
+                onChange={(e) => setConfig({...config, invoiceTemplateId: e.target.value})}
+                placeholder="Optional: Invoice template ID"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="ndaTemplate">NDA Template ID</Label>
+              <Input
+                id="ndaTemplate"
+                value={config.ndaTemplateId}
+                onChange={(e) => setConfig({...config, ndaTemplateId: e.target.value})}
+                placeholder="Optional: NDA template ID"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="msaTemplate">MSA Template ID</Label>
+              <Input
+                id="msaTemplate"
+                value={config.msaTemplateId}
+                onChange={(e) => setConfig({...config, msaTemplateId: e.target.value})}
+                placeholder="Optional: MSA template ID"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Webhook Configuration */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center">
+            <Settings className="w-5 h-5 mr-2" />
+            Webhook Configuration
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-slate-600">
+            Copy this webhook URL and add it to your PandaDoc webhook settings to get real-time updates.
+          </p>
+          
+          <div className="flex items-center space-x-2">
+            <Input
+              readOnly
+              value={typeof window !== 'undefined' ? `${window.location.origin}/api/pandadoc/webhook` : ''}
+              className="flex-1"
+            />
+            <Button onClick={copyWebhookUrl} variant="outline">
+              <Copy className="w-4 h-4 mr-2" />
+              Copy
+            </Button>
+          </div>
+          
+          <p className="text-xs text-slate-500">
+            Add this URL in PandaDoc → Settings → Webhooks to enable automatic status updates
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Save Button */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-slate-600">
+              {saved && (
+                <div className="flex items-center text-green-600">
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  Configuration saved successfully!
+                </div>
+              )}
+            </div>
+            <Button onClick={handleSave} disabled={saving || !config.apiKey} size="lg">
+              {saving ? 'Saving...' : 'Save Configuration'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}

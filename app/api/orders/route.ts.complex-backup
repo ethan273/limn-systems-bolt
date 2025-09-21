@@ -1,0 +1,392 @@
+import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { validateRequest, validateData } from '@/lib/validation/middleware';
+import { createOrderSchema, paginationSchema } from '@/lib/validation/schemas';
+import { requirePermissions, createPermissionResponse } from '@/lib/permissions/rbac';
+import { checkAuthRateLimit, getClientIdentifier, recordFailedAuth, addSecurityHeaders } from '@/lib/validation/auth-validation';
+import { securityValidators } from '@/lib/validation/middleware';
+import { withRateLimit, rateLimitConfigs } from '@/lib/rate-limiting/middleware';
+import { withCaching, CacheConfigs, CacheManager } from '@/lib/performance/caching-middleware';
+import { DatabaseOptimizer } from '@/lib/performance/database-optimization';
+import { errorResponses } from '@/lib/error-handling/error-middleware';
+import { secureLogger, LogCategory } from '@/lib/logging/secure-logger';
+import { z } from 'zod';
+import { 
+  safeHandleAPIError, 
+  safeGet, 
+  safeDatabaseResult, 
+  createValidationError, 
+  SafeValidationError 
+} from '/Users/ethanowen/limn-systems/lib/utils/bulk-type-fixes';
+
+// TypeScript interfaces for order data
+type CreateOrderData = z.infer<typeof createOrderSchema>
+
+interface OrderItem {
+  itemId: string
+  quantity: number
+  unitPrice: number
+  notes?: string
+}
+
+async function getOrdersHandler(request: NextRequest): Promise<NextResponse> {
+  try {
+    // Apply read operations rate limiting
+    const rateLimitResult = await withRateLimit(request, rateLimitConfigs.read_operations)
+    if (!rateLimitResult.success) {
+      return rateLimitResult.response!
+    }
+
+    // Authentication and authorization
+    const validationResult = await requirePermissions(
+      request,
+      [],
+      {
+        requireAll: false,
+        allowedRoles: ['super_admin', 'admin', 'manager', 'lead', 'employee'],
+        enforceActive: true
+      }
+    );
+
+    if (!validationResult.valid) {
+      const response = createPermissionResponse(
+        false,
+        validationResult.error || 'Access denied',
+        validationResult.statusCode || 403
+      );
+      return addSecurityHeaders(response);
+    }
+
+    const supabase = await createServerSupabaseClient();
+
+    // Parse pagination and sort parameters using optimizer
+    const { searchParams } = new URL(request.url);
+    const pagination = DatabaseOptimizer.parsePaginationParams(searchParams);
+    const sort = DatabaseOptimizer.parseSortParams(searchParams, 'orders');
+    
+    // Additional filters
+    const status = searchParams.get('status');
+    const customerId = searchParams.get('customerId');
+    const search = DatabaseOptimizer.sanitizeSearchTerm(searchParams.get('search') || '');
+
+    // Build optimized query
+    const buildDataQuery = () => {
+      let query = supabase
+        .from('orders')
+        .select(`
+          id,
+          order_number,
+          total_amount,
+          status,
+          priority,
+          customer_id,
+          due_date,
+          created_at,
+          updated_at,
+          customer:customers(
+            id,
+            name,
+            email,
+            company_name,
+            status
+          ),
+          order_items!inner(
+            id,
+            quantity,
+            unit_price,
+            item:items(
+              id,
+              name,
+              sku,
+              base_price
+            )
+          )
+        `) as any;
+      
+      // Apply filters with proper type casting
+      if (status && status !== 'all') {
+        query = (query as any).eq('status', status);
+      }
+      
+      if (customerId) {
+        query = (query as any).eq('customer_id', customerId);
+      }
+
+      // Apply search if provided
+      if (search) {
+        query = (query as any).or(`order_number.ilike.%${search}%,customer.name.ilike.%${search}%`);
+      }
+      
+      return query;
+    };
+
+    // Build count query for pagination
+    const buildCountQuery = () => {
+      let query = supabase.from('orders') as any;
+      
+      if (status && status !== 'all') {
+        query = (query as any).eq('status', status);
+      }
+      
+      if (customerId) {
+        query = (query as any).eq('customer_id', customerId);
+      }
+
+      if (search) {
+        query = (query as any).or(`order_number.ilike.%${search}%`);
+      }
+      
+      return query;
+    };
+
+    // Execute optimized paginated query
+    const result = await DatabaseOptimizer.executePaginatedQuery(
+      buildDataQuery,
+      buildCountQuery,
+      pagination,
+      sort,
+      'orders'
+    );
+    
+    // Get order status statistics (cached separately for better performance)
+    const { data: statusData } = await supabase
+      .from('orders')
+      .select('status');
+    
+    const stats = {
+      total: statusData?.length || 0,
+      pending: statusData?.filter(o => o.status === 'pending').length || 0,
+      in_production: statusData?.filter(o => o.status === 'in_production').length || 0,
+      shipping: statusData?.filter(o => o.status === 'shipping').length || 0,
+      delivered: statusData?.filter(o => o.status === 'delivered').length || 0,
+    };
+
+    await secureLogger.info('Orders fetched', {
+      userId: validationResult.user?.id,
+      totalRecords: result.pagination.total,
+      page: pagination.page,
+      limit: pagination.limit,
+      filters: { status, customerId, hasSearch: !!search }
+    }, {
+      category: LogCategory.API
+    });
+    
+    const response = NextResponse.json({ 
+      success: true,
+      data: result.data,
+      pagination: result.pagination,
+      stats,
+      filters: {
+        status: status || 'all',
+        customerId,
+        search: search || undefined
+      }
+    });
+
+    return addSecurityHeaders(response);
+    
+  } catch (error) {
+    return await safeHandleAPIError(error, 'Failed to fetch orders', request);
+  }
+}
+
+// Apply caching to GET requests
+export const GET = withCaching(
+  getOrdersHandler,
+  CacheConfigs.SHORT, // 5 minutes cache for orders (frequently changing data)
+  {
+    keyPrefix: 'orders',
+    includeParams: ['page', 'limit', 'sortBy', 'sortOrder', 'status', 'customerId', 'search'],
+    includeHeaders: ['x-user-id'], // Include user for permission-based caching
+    cachePredicate: (request, response) => {
+      return response.status === 200;
+    }
+  }
+);
+
+export async function POST(request: NextRequest) {
+  const startTime = Date.now();
+  let userId: string | undefined;
+  
+  try {
+    // Apply write operations rate limiting
+    const rateLimitResult = await withRateLimit(request, rateLimitConfigs.write_operations)
+    if (!rateLimitResult.success) {
+      return rateLimitResult.response!
+    }
+
+    // Authentication and authorization
+    const validationResult = await requirePermissions(
+      request,
+      [],
+      {
+        requireAll: false,
+        allowedRoles: ['super_admin', 'admin', 'manager', 'lead', 'employee'],
+        enforceActive: true
+      }
+    );
+
+    if (!validationResult.valid) {
+      const response = createPermissionResponse(
+        false,
+        validationResult.error || 'Access denied',
+        validationResult.statusCode || 403
+      );
+      return addSecurityHeaders(response);
+    }
+
+    userId = validationResult.user?.id;
+
+    // Input validation with security checks
+    let requestData: unknown;
+    try {
+      requestData = await request.json();
+    } catch {
+      return await safeHandleAPIError(
+        new Error('Invalid JSON in request body'),
+        'Invalid JSON in request body',
+        request
+      );
+    }
+
+    // Security validation
+    const checkStrings = (obj: unknown): boolean => {
+      if (typeof obj !== 'object' || obj === null) return true;
+      const record = obj as Record<string, unknown>;
+      for (const [key, value] of Object.entries(record)) {
+        if (typeof value === 'string') {
+          if (!securityValidators.isSafe(value)) {
+            throw new Error(`Security validation failed for field: ${key}`);
+          }
+        } else if (typeof value === 'object' && value !== null) {
+          if (!checkStrings(value)) return false;
+        }
+      }
+      return true;
+    };
+
+    if (!checkStrings(requestData)) {
+      return await safeHandleAPIError(
+        new Error('Security validation failed'),
+        'Security validation failed',
+        request
+      );
+    }
+
+    // Schema validation
+    const validation = validateData(createOrderSchema, requestData, 'body');
+    if (!validation.success) {
+      // Safe error handling with proper validation error structure
+      const errors = validation.errors || [];
+      const errorMessage = errors.length > 0 
+        ? (errors[0]?.message || 'Validation failed')
+        : 'Validation failed';
+      
+      return await safeHandleAPIError(
+        new Error(errorMessage),
+        'Data validation failed',
+        request
+      );
+    }
+
+    const validatedData = validation.data as CreateOrderData;
+    const supabase = await createServerSupabaseClient();
+    
+    // Verify customer exists
+    const { error: customerError } = await (supabase
+      .from('customers')
+      .select('id') as any)
+      .eq('id', validatedData.customerId)
+      .single()
+
+    if (customerError && customerError.code === 'PGRST116') {
+      return await safeHandleAPIError(new Error('Customer not found'), 'Customer not found', request);
+    }
+
+    const { data: order, error: orderError } = await (supabase
+      .from('orders')
+      .insert({
+        customer_id: validatedData.customerId,
+        order_number: validatedData.orderNumber,
+        status: validatedData.status || 'draft',
+        priority: validatedData.priority || 'medium',
+        due_date: validatedData.dueDate,
+        notes: validatedData.notes,
+        shipping_address: validatedData.shippingAddress
+      }) as any)
+    .select()
+    .single();
+  
+    if (orderError) {
+      return await safeHandleAPIError(orderError, 'Failed to create order', request);
+    }
+    
+    // Insert order items
+    if (validatedData.items && validatedData.items.length > 0) {
+      const orderItems = validatedData.items.map((item: OrderItem) => ({
+        order_id: order.id,
+        item_id: item.itemId,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        notes: item.notes
+      }));
+      
+      const { error: itemsError } = await (supabase
+        .from('order_items')
+        .insert(orderItems) as any);
+      
+      if (itemsError) {
+        return await safeHandleAPIError(itemsError, 'Failed to insert order items', request);
+      }
+    }
+  
+    // Initialize production tracking if status is not draft
+    if (validatedData.status && validatedData.status !== 'draft') {
+      const { data: firstStage } = await (supabase
+        .from('production_stages')
+        .select('id') as any)
+        .eq('stage_order', 1)
+        .single();
+      
+      if (firstStage) {
+        await (supabase
+          .from('production_tracking')
+          .insert({
+            order_id: order.id,
+            current_stage_id: firstStage.id,
+            progress: 0,
+            started_at: new Date().toISOString()
+          }) as any);
+      }
+    }
+
+    // Invalidate related cache entries
+    const invalidatedOrders = CacheManager.invalidate('orders');
+    const invalidatedCustomers = CacheManager.invalidate('customers'); // Customer stats might be affected
+    
+    await secureLogger.info('Order created successfully', {
+      orderId: order.id,
+      customerId: validatedData.customerId,
+      userId,
+      orderNumber: validatedData.orderNumber,
+      itemCount: validatedData.items?.length || 0,
+      cacheInvalidated: {
+        orders: invalidatedOrders,
+        customers: invalidatedCustomers
+      }
+    }, {
+      category: LogCategory.API
+    });
+    
+    const response = NextResponse.json({
+      success: true,
+      data: order,
+      message: 'Order created successfully'
+    }, { status: 201 });
+
+    return addSecurityHeaders(response);
+    
+  } catch (error) {
+    return await safeHandleAPIError(error, 'Failed to create order', request);
+  }
+}

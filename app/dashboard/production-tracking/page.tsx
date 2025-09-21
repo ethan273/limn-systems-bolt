@@ -1,0 +1,294 @@
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Calendar, Package, Truck, CheckCircle, AlertCircle, Clock, Download } from 'lucide-react'
+import { PageLoading } from '@/components/ui/enhanced-loading-states'
+
+interface ProductionItem {
+  id: string
+  order_id: string
+  sku: string
+  name: string
+  quantity: number
+  status: string
+  current_stage: string
+  completion_percentage: number
+  estimated_completion: string
+  order: {
+    order_number: string
+    customer: {
+      name: string
+    }
+  }
+}
+
+export default function ProductionTrackingPage() {
+  const [items, setItems] = useState<ProductionItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState('all')
+  const [error, setError] = useState('')
+
+  const fetchProductionItems = useCallback(async () => {
+    try {
+      setLoading(true)
+
+      // Fetch real production tracking data from API
+      const response = await fetch('/api/production-tracking', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include'
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        if (result.success && Array.isArray(result.data)) {
+          setItems(result.data)
+          setError('')
+          console.log(`Loaded ${result.data.length} production tracking items from API`)
+          return
+        }
+      }
+
+      // If API fails or returns no data, set empty array with helpful error message
+      console.log('Production tracking API returned no data or failed - check if production_items table exists')
+      setItems([])
+      setError('No production tracking data available. Check if production_items table exists and contains data.')
+    } catch (error) {
+      console.error('Error fetching production tracking data:', error)
+      setError('Failed to load production tracking data')
+      setItems([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchProductionItems()
+  }, [fetchProductionItems])
+
+  const getStageIcon = (stage: string) => {
+    switch (stage?.toLowerCase()) {
+      case 'design': return <Calendar className="w-4 h-4" />
+      case 'production': return <Package className="w-4 h-4" />
+      case 'shipping': return <Truck className="w-4 h-4" />
+      case 'completed': return <CheckCircle className="w-4 h-4" />
+      default: return <Clock className="w-4 h-4" />
+    }
+  }
+
+  const getStatusColor = (status: string): "default" | "secondary" | "destructive" | "outline" => {
+    switch (status?.toLowerCase()) {
+      case 'completed': return 'secondary'
+      case 'in_progress': return 'default'
+      case 'delayed': return 'destructive'
+      default: return 'outline'
+    }
+  }
+
+  const filteredItems = items.filter(item => {
+    if (activeTab === 'all') return true
+    if (activeTab === 'active') return item.status !== 'completed'
+    if (activeTab === 'completed') return item.status === 'completed'
+    return item.current_stage?.toLowerCase() === activeTab
+  })
+
+  const exportToCSV = () => {
+    if (items.length === 0) {
+      return
+    }
+
+    const headers = [
+      'Order Number',
+      'Customer',
+      'SKU',
+      'Product Name',
+      'Quantity',
+      'Status',
+      'Current Stage',
+      'Completion %',
+      'Estimated Completion'
+    ]
+
+    const csvData = items.map(item => [
+      item.order?.order_number || '',
+      item.order?.customer?.name || '',
+      item.sku || '',
+      item.name || '',
+      item.quantity || 0,
+      item.status || '',
+      item.current_stage || '',
+      item.completion_percentage || 0,
+      item.estimated_completion ? new Date(item.estimated_completion).toLocaleDateString() : ''
+    ])
+
+    const csvContent = [
+      headers.join(','),
+      ...csvData.map(row => row.map(field => 
+        typeof field === 'string' && field.includes(',') ? `"${field}"` : field
+      ).join(','))
+    ].join('\n')
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    const url = URL.createObjectURL(blob)
+    link.setAttribute('href', url)
+    link.setAttribute('download', `production-tracking-${new Date().toISOString().split('T')[0]}.csv`)
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  if (loading) {
+    return <PageLoading />
+  }
+
+  return (
+    <div className="container mx-auto p-6">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-4xl font-bold text-slate-900">Production Tracking</h1>
+        <div className="flex gap-3">
+          <Button
+            onClick={fetchProductionItems}
+            disabled={loading}
+            variant="outline"
+          >
+            {loading ? 'Refreshing...' : 'Refresh'}
+          </Button>
+          <Button onClick={exportToCSV} disabled={items.length === 0}>
+            <Download className="w-4 h-4 mr-2" />
+            Export Report
+          </Button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="bg-amber-50 border border-amber-200 rounded-md p-4 mb-6">
+          <div className="text-amber-800 text-sm">
+            <strong>Error:</strong> {error}
+          </div>
+        </div>
+      )}
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Total Items</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{items.length}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">In Production</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">
+              {items.filter(i => i.status === 'in_progress').length}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Completed</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">
+              {items.filter(i => i.status === 'completed').length}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Delayed</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">
+              {items.filter(i => i.status === 'delayed').length}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="mb-4">
+          <TabsTrigger value="all">All Items</TabsTrigger>
+          <TabsTrigger value="active">Active</TabsTrigger>
+          <TabsTrigger value="design">Design</TabsTrigger>
+          <TabsTrigger value="production">Production</TabsTrigger>
+          <TabsTrigger value="shipping">Shipping</TabsTrigger>
+          <TabsTrigger value="completed">Completed</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value={activeTab}>
+          <div className="grid gap-4">
+            {filteredItems.map((item) => (
+              <Card key={item.id}>
+                <CardContent className="p-6">
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-lg font-semibold">{item.name}</h3>
+                        <Badge variant={getStatusColor(item.status)}>
+                          {item.status}
+                        </Badge>
+                      </div>
+                      <div className="text-sm text-slate-500">
+                        SKU: {item.sku} | Order: {item.order?.order_number}
+                      </div>
+                      <div className="text-sm">
+                        Customer: {item.order?.customer?.name}
+                      </div>
+                      <div className="flex items-center gap-4 mt-3">
+                        <div className="flex items-center gap-1">
+                          {getStageIcon(item.current_stage)}
+                          <span className="text-sm">{item.current_stage}</span>
+                        </div>
+                        <div className="text-sm text-slate-500">
+                          Qty: {item.quantity}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm text-slate-500 mb-1">
+                        Completion: {item.completion_percentage || 0}%
+                      </div>
+                      <Progress 
+                        value={item.completion_percentage || 0} 
+                        className="w-32"
+                      />
+                      <div className="text-xs text-slate-500 mt-1">
+                        Est: {item.estimated_completion ? 
+                          new Date(item.estimated_completion).toLocaleDateString() : 
+                          'TBD'}
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+
+            {filteredItems.length === 0 && (
+              <Card>
+                <CardContent className="p-12 text-center">
+                  <AlertCircle className="w-12 h-12 mx-auto mb-4 text-slate-500" />
+                  <p className="text-slate-500">No production items found</p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}

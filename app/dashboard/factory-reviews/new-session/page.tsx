@@ -1,0 +1,968 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Badge } from '@/components/ui/badge'
+import {
+  ArrowLeft,
+  Plus,
+  X,
+  Calendar,
+  Users,
+  FileText,
+  Save,
+  Send,
+  AlertCircle,
+  CheckCircle2,
+  Upload,
+  File,
+  Trash2
+} from 'lucide-react'
+import Link from 'next/link'
+
+interface Manufacturer {
+  id: string
+  name: string
+  contact_email: string
+  contact_phone: string
+  address: string
+}
+
+interface PrototypeOption {
+  id: string
+  name: string
+  order_number: string
+  item_code: string
+  customer_name: string
+  production_status: string
+  priority: string
+  collection_id?: string
+  collection_name?: string
+}
+
+interface Collection {
+  id: string
+  name: string
+  prefix: string
+  description?: string
+  active?: boolean
+}
+
+interface Participant {
+  id?: string
+  name: string
+  email: string
+  role: string
+  company: string
+  can_approve: boolean
+}
+
+interface CustomItem {
+  id: string
+  name: string
+  order_number: string
+  item_code: string
+  customer_name: string
+}
+
+interface UploadedFile {
+  id: string
+  file: File
+  name: string
+}
+
+interface SessionForm {
+  session_name: string
+  factory_id: string
+  scheduled_date: string
+  scheduled_time: string
+  selected_prototypes: string[]
+  custom_items: CustomItem[]
+  participants: Participant[]
+  session_notes: string
+  shop_drawings: UploadedFile[]
+}
+
+export default function NewReviewSessionPage() {
+  const router = useRouter()
+  
+  const [manufacturers, setManufacturers] = useState<Manufacturer[]>([])
+  const [collections, setCollections] = useState<Collection[]>([])
+  const [availablePrototypes, setAvailablePrototypes] = useState<PrototypeOption[]>([])
+  const [filteredPrototypes, setFilteredPrototypes] = useState<PrototypeOption[]>([])
+  const [selectedCollectionId, setSelectedCollectionId] = useState<string>('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  
+  const [form, setForm] = useState<SessionForm>({
+    session_name: '',
+    factory_id: '',
+    scheduled_date: '',
+    scheduled_time: '',
+    selected_prototypes: [],
+    custom_items: [],
+    participants: [],
+    session_notes: '',
+    shop_drawings: []
+  })
+
+  useEffect(() => {
+    loadInitialData()
+  }, [])
+
+  const loadInitialData = async () => {
+    setLoading(true)
+    try {
+      // Fetch manufacturers from API
+      const manufacturersResponse = await fetch('/api/manufacturers')
+      const manufacturersData = await manufacturersResponse.json()
+
+      // Fetch collections from API
+      const collectionsResponse = await fetch('/api/collections')
+      const collectionsData = await collectionsResponse.json()
+
+      // Fetch prototypes from API
+      const prototypesResponse = await fetch('/api/prototypes')
+      const prototypesData = await prototypesResponse.json()
+
+      if (manufacturersResponse.ok) {
+        setManufacturers(manufacturersData)
+      } else {
+        console.error('Error loading manufacturers:', manufacturersData.error)
+        setManufacturers([])
+      }
+
+      if (collectionsResponse.ok && collectionsData.success) {
+        setCollections(collectionsData.data)
+      } else {
+        console.error('Error loading collections:', collectionsData.error)
+        setCollections([])
+      }
+
+      if (prototypesResponse.ok) {
+        setAvailablePrototypes(prototypesData)
+        setFilteredPrototypes(prototypesData) // Initially show all
+      } else {
+        console.error('Error loading prototypes:', prototypesData.error)
+        setAvailablePrototypes([])
+        setFilteredPrototypes([])
+      }
+      
+      // Auto-generate session name based on current date
+      const today = new Date()
+      const monthYear = today.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+      setForm(prev => ({
+        ...prev,
+        session_name: `${monthYear} Review - Batch A`,
+        scheduled_date: today.toISOString().split('T')[0],
+        scheduled_time: '09:00'
+      }))
+      
+    } catch (error) {
+      console.error('Error loading initial data:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const updateForm = (field: keyof SessionForm, value: string | string[] | CustomItem[] | Participant[] | UploadedFile[]) => {
+    setForm(prev => ({ ...prev, [field]: value }))
+    // Clear error when user starts typing
+    if (errors[field]) {
+      setErrors(prev => ({ ...prev, [field]: '' }))
+    }
+  }
+
+  const handleCollectionChange = (collectionId: string) => {
+    setSelectedCollectionId(collectionId)
+
+    if (collectionId === '') {
+      // Show all prototypes
+      setFilteredPrototypes(availablePrototypes)
+    } else {
+      // Filter prototypes by collection
+      const filtered = availablePrototypes.filter(p => p.collection_id === collectionId)
+      setFilteredPrototypes(filtered)
+    }
+
+    // Clear any selected prototypes that are no longer visible
+    setForm(prev => ({
+      ...prev,
+      selected_prototypes: prev.selected_prototypes.filter(id =>
+        collectionId === '' ? true : availablePrototypes.find(p => p.id === id)?.collection_id === collectionId
+      )
+    }))
+  }
+
+  const togglePrototype = (prototypeId: string) => {
+    setForm(prev => ({
+      ...prev,
+      selected_prototypes: prev.selected_prototypes.includes(prototypeId)
+        ? prev.selected_prototypes.filter(id => id !== prototypeId)
+        : [...prev.selected_prototypes, prototypeId]
+    }))
+  }
+
+  const addParticipant = () => {
+    setForm(prev => ({
+      ...prev,
+      participants: [
+        ...prev.participants,
+        { name: '', email: '', role: '', company: '', can_approve: false }
+      ]
+    }))
+  }
+
+  const updateParticipant = (index: number, field: keyof Participant, value: string | boolean) => {
+    setForm(prev => ({
+      ...prev,
+      participants: prev.participants.map((p, i) => 
+        i === index ? { ...p, [field]: value } : p
+      )
+    }))
+  }
+
+  const removeParticipant = (index: number) => {
+    setForm(prev => ({
+      ...prev,
+      participants: prev.participants.filter((_, i) => i !== index)
+    }))
+  }
+
+  const addCustomItem = () => {
+    const newItem: CustomItem = {
+      id: Date.now().toString(),
+      name: '',
+      order_number: '',
+      item_code: '',
+      customer_name: ''
+    }
+    setForm(prev => ({
+      ...prev,
+      custom_items: [...prev.custom_items, newItem]
+    }))
+  }
+
+  const updateCustomItem = (index: number, field: keyof CustomItem, value: string) => {
+    setForm(prev => ({
+      ...prev,
+      custom_items: prev.custom_items.map((item, i) =>
+        i === index ? { ...item, [field]: value } : item
+      )
+    }))
+  }
+
+  const removeCustomItem = (index: number) => {
+    setForm(prev => ({
+      ...prev,
+      custom_items: prev.custom_items.filter((_, i) => i !== index)
+    }))
+  }
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files) {
+      const files = Array.from(event.target.files)
+      const newFiles = files.map(file => ({
+        id: `file-${Date.now()}-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`,
+        file,
+        name: file.name
+      }))
+      setForm(prev => ({
+        ...prev,
+        shop_drawings: [...prev.shop_drawings, ...newFiles]
+      }))
+    }
+  }
+
+  const removeFile = (fileId: string) => {
+    setForm(prev => ({
+      ...prev,
+      shop_drawings: prev.shop_drawings.filter(f => f.id !== fileId)
+    }))
+  }
+
+  const validateForm = () => {
+    const newErrors: Record<string, string> = {}
+
+    if (!form.session_name.trim()) {
+      newErrors.session_name = 'Session name is required'
+    }
+
+    if (!form.factory_id) {
+      newErrors.factory_id = 'Please select a manufacturer'
+    }
+
+    if (!form.scheduled_date) {
+      newErrors.scheduled_date = 'Please select a date'
+    }
+
+    if (!form.scheduled_time) {
+      newErrors.scheduled_time = 'Please select a time'
+    }
+
+    if (form.selected_prototypes.length === 0 && form.custom_items.length === 0) {
+      newErrors.selected_prototypes = 'Please select at least one prototype or add a custom item'
+    }
+
+    // Validate custom items
+    form.custom_items.forEach((item, index) => {
+      if (!item.name.trim()) {
+        newErrors[`custom_item_${index}_name`] = 'Item name is required'
+      }
+      if (!item.order_number.trim()) {
+        newErrors[`custom_item_${index}_order_number`] = 'Order number is required'
+      }
+    })
+
+    // Validate participants
+    form.participants.forEach((participant, index) => {
+      if (!participant.name.trim()) {
+        newErrors[`participant_${index}_name`] = 'Name is required'
+      }
+      if (!participant.email.trim()) {
+        newErrors[`participant_${index}_email`] = 'Email is required'
+      }
+      if (!participant.role.trim()) {
+        newErrors[`participant_${index}_role`] = 'Role is required'
+      }
+      if (!participant.company.trim()) {
+        newErrors[`participant_${index}_company`] = 'Company is required'
+      }
+    })
+
+    setErrors(newErrors)
+    return Object.keys(newErrors).length === 0
+  }
+
+  const saveSession = async (isDraft = false) => {
+    if (!validateForm()) {
+      return
+    }
+
+    setSaving(true)
+    try {
+      // Get the selected manufacturer name
+      const selectedManufacturer = manufacturers.find(m => m.id === form.factory_id)
+
+      const sessionData = {
+        session_name: form.session_name,
+        factory_name: selectedManufacturer?.name || 'Unknown Factory',
+        scheduled_date: `${form.scheduled_date}T${form.scheduled_time}:00Z`,
+        prototype_count: form.selected_prototypes.length + form.custom_items.length,
+        session_notes: form.session_notes,
+        status: isDraft ? 'draft' : 'scheduled'
+      }
+
+      const response = await fetch('/api/factory-reviews/sessions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(sessionData)
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+
+        // If we have participants, add them to the session
+        if (form.participants.length > 0) {
+          const validParticipants = form.participants.filter(p =>
+            p.name.trim() && p.email.trim() && p.role.trim() && p.company.trim()
+          )
+
+          for (const participant of validParticipants) {
+            await fetch(`/api/factory-reviews/sessions/${result.data.id}/participants`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                name: participant.name,
+                email: participant.email,
+                role: participant.role,
+                company: participant.company,
+                can_approve: participant.can_approve
+              })
+            })
+          }
+        }
+
+        alert('Review session created successfully!')
+        router.push(`/dashboard/factory-reviews/sessions/${result.data.id}`)
+      } else {
+        const errorData = await response.json()
+        alert(`Error creating session: ${errorData.error}`)
+      }
+
+    } catch (error) {
+      console.error('Error saving session:', error)
+      alert('Error saving session')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'urgent': return 'bg-red-100 text-red-800 border-red-300'
+      case 'high': return 'bg-orange-100 text-orange-800 border-orange-300'
+      case 'normal': return 'bg-blue-100 text-blue-800 border-blue-300'
+      case 'low': return 'bg-gray-100 text-slate-900 border-gray-300'
+      default: return 'bg-gray-100 text-slate-900 border-gray-300'
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="p-6">
+        <div className="animate-pulse space-y-6">
+          <div className="h-8 bg-stone-200 rounded w-1/3"></div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="h-96 bg-stone-200 rounded"></div>
+            <div className="h-96 bg-stone-200 rounded"></div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-4">
+          <Link href="/dashboard/factory-reviews">
+            <Button variant="outline" size="sm">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back
+            </Button>
+          </Link>
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">New Factory Review Session</h1>
+            <p className="text-slate-600 mt-1">Set up a new prototype review session</p>
+          </div>
+        </div>
+        <div className="flex items-center space-x-3">
+          <Button variant="outline" onClick={() => saveSession(true)} disabled={saving}>
+            <Save className="w-4 h-4 mr-2" />
+            Save Draft
+          </Button>
+          <Button onClick={() => saveSession(false)} disabled={saving}>
+            <Send className="w-4 h-4 mr-2" />
+            {saving ? 'Creating...' : 'Create Session'}
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left Column - Basic Details */}
+        <div className="space-y-6">
+          {/* Session Details */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Calendar className="w-5 h-5 mr-2" />
+                Session Details
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label htmlFor="session_name">Session Name</Label>
+                <Input
+                  id="session_name"
+                  value={form.session_name}
+                  onChange={(e) => updateForm('session_name', e.target.value)}
+                  placeholder="e.g., January 2025 Review - Batch A"
+                  className={errors.session_name ? 'border-red-500' : ''}
+                />
+                {errors.session_name && (
+                  <p className="text-red-500 text-sm mt-1">{errors.session_name}</p>
+                )}
+              </div>
+
+              <div>
+                <Label htmlFor="factory_id">Manufacturer</Label>
+                <Select value={form.factory_id} onValueChange={(value) => updateForm('factory_id', value)}>
+                  <SelectTrigger className={errors.factory_id ? 'border-red-500' : ''}>
+                    <SelectValue placeholder="Select manufacturer..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {manufacturers.map((manufacturer) => (
+                      <SelectItem key={manufacturer.id} value={manufacturer.id}>
+                        <div>
+                          <div className="font-medium">{manufacturer.name}</div>
+                          <div className="text-sm text-slate-500">{manufacturer.address}</div>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {errors.factory_id && (
+                  <p className="text-red-500 text-sm mt-1">{errors.factory_id}</p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="scheduled_date">Review Date</Label>
+                  <Input
+                    id="scheduled_date"
+                    type="date"
+                    value={form.scheduled_date}
+                    onChange={(e) => updateForm('scheduled_date', e.target.value)}
+                    className={errors.scheduled_date ? 'border-red-500' : ''}
+                  />
+                  {errors.scheduled_date && (
+                    <p className="text-red-500 text-sm mt-1">{errors.scheduled_date}</p>
+                  )}
+                </div>
+                <div>
+                  <Label htmlFor="scheduled_time">Start Time</Label>
+                  <Input
+                    id="scheduled_time"
+                    type="time"
+                    value={form.scheduled_time}
+                    onChange={(e) => updateForm('scheduled_time', e.target.value)}
+                    className={errors.scheduled_time ? 'border-red-500' : ''}
+                  />
+                  {errors.scheduled_time && (
+                    <p className="text-red-500 text-sm mt-1">{errors.scheduled_time}</p>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="session_notes">Session Notes (Optional)</Label>
+                <Textarea
+                  id="session_notes"
+                  value={form.session_notes}
+                  onChange={(e) => updateForm('session_notes', e.target.value)}
+                  placeholder="Any special instructions or focus areas for this review session..."
+                  className="min-h-[80px]"
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Participants */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center">
+                  <Users className="w-5 h-5 mr-2" />
+                  Review Participants
+                </CardTitle>
+                <Button variant="outline" size="sm" onClick={addParticipant}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Participant
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {form.participants.map((participant, index) => (
+                <div key={index} className="border border-gray-200 rounded-md p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-medium">Participant {index + 1}</h4>
+                    {index >= 3 && ( // Don't allow removing the first 3 pre-populated participants
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeParticipant(index)}
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    )}
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>Name</Label>
+                      <Input
+                        value={participant.name}
+                        onChange={(e) => updateParticipant(index, 'name', e.target.value)}
+                        placeholder="Full name"
+                        className={errors[`participant_${index}_name`] ? 'border-red-500' : ''}
+                      />
+                      {errors[`participant_${index}_name`] && (
+                        <p className="text-red-500 text-xs mt-1">{errors[`participant_${index}_name`]}</p>
+                      )}
+                    </div>
+                    <div>
+                      <Label>Email</Label>
+                      <Input
+                        type="email"
+                        value={participant.email}
+                        onChange={(e) => updateParticipant(index, 'email', e.target.value)}
+                        placeholder="email@company.com"
+                        className={errors[`participant_${index}_email`] ? 'border-red-500' : ''}
+                      />
+                      {errors[`participant_${index}_email`] && (
+                        <p className="text-red-500 text-xs mt-1">{errors[`participant_${index}_email`]}</p>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>Role</Label>
+                      <Input
+                        value={participant.role}
+                        onChange={(e) => updateParticipant(index, 'role', e.target.value)}
+                        placeholder="e.g., CEO, Designer, QC Manager"
+                        className={errors[`participant_${index}_role`] ? 'border-red-500' : ''}
+                      />
+                      {errors[`participant_${index}_role`] && (
+                        <p className="text-red-500 text-xs mt-1">{errors[`participant_${index}_role`]}</p>
+                      )}
+                    </div>
+                    <div>
+                      <Label>Company</Label>
+                      <Input
+                        value={participant.company}
+                        onChange={(e) => updateParticipant(index, 'company', e.target.value)}
+                        placeholder="Company name"
+                        className={errors[`participant_${index}_company`] ? 'border-red-500' : ''}
+                      />
+                      {errors[`participant_${index}_company`] && (
+                        <p className="text-red-500 text-xs mt-1">{errors[`participant_${index}_company`]}</p>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`approval_${index}`}
+                      checked={participant.can_approve}
+                      onCheckedChange={(checked) => updateParticipant(index, 'can_approve', checked)}
+                    />
+                    <Label htmlFor={`approval_${index}`} className="text-sm">
+                      Can approve final decisions
+                    </Label>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Right Column - Prototype Selection */}
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <FileText className="w-5 h-5 mr-2" />
+                  Select Prototypes for Review
+                </div>
+                <Badge variant="outline">
+                  {form.selected_prototypes.length} selected
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {errors.selected_prototypes && (
+                <div className="flex items-center space-x-2 p-3 bg-red-50 border border-red-200 rounded-md mb-4">
+                  <AlertCircle className="w-4 h-4 text-red-600" />
+                  <p className="text-red-600 text-sm">{errors.selected_prototypes}</p>
+                </div>
+              )}
+
+              {/* Collection Filter */}
+              <div className="mb-4">
+                <Label htmlFor="collection-select">Filter by Collection</Label>
+                <Select value={selectedCollectionId} onValueChange={handleCollectionChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a collection..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">All Collections</SelectItem>
+                    {collections.map((collection) => (
+                      <SelectItem key={collection.id} value={collection.id}>
+                        {collection.name} ({collection.prefix})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-3">
+                {filteredPrototypes.map((prototype) => (
+                  <div 
+                    key={prototype.id} 
+                    className={`border rounded-md p-4 cursor-pointer transition-colors ${
+                      form.selected_prototypes.includes(prototype.id) 
+                        ? 'border-primary bg-primary/5' 
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                    onClick={() => togglePrototype(prototype.id)}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start space-x-3">
+                        <Checkbox
+                          checked={form.selected_prototypes.includes(prototype.id)}
+                          onChange={() => {}} // Handled by parent click
+                        />
+                        <div className="space-y-1">
+                          <h4 className="font-medium text-slate-900">{prototype.name}</h4>
+                          <div className="flex items-center space-x-4 text-sm text-slate-600">
+                            <span>Order: {prototype.order_number}</span>
+                            <span>Item: {prototype.item_code}</span>
+                          </div>
+                          <div className="text-sm text-slate-600">
+                            Customer: {prototype.customer_name}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end space-y-1">
+                        <Badge variant="outline" className={getPriorityColor(prototype.priority)}>
+                          {prototype.priority.toUpperCase()}
+                        </Badge>
+                        <Badge className="bg-green-100 text-green-800">
+                          {prototype.production_status.replace('_', ' ')}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              {availablePrototypes.length === 0 && (
+                <div className="text-center py-8 text-slate-500">
+                  <FileText className="w-12 h-12 mx-auto mb-4 text-slate-500" />
+                  <p>No prototypes available for review</p>
+                  <p className="text-sm">Check that prototypes are marked as ready for review</p>
+                </div>
+              )}
+
+              {/* Custom Items Section */}
+              <div className="border-t border-gray-200 pt-6 mt-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-md font-medium text-slate-900">Or Add Custom Items</h3>
+                  <Button variant="outline" size="sm" onClick={addCustomItem}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add Item
+                  </Button>
+                </div>
+
+                {form.custom_items.length > 0 && (
+                  <div className="space-y-3">
+                    {form.custom_items.map((item, index) => (
+                      <div key={item.id} className="border border-gray-200 rounded-md p-4 bg-gray-50">
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="text-sm font-medium">Custom Item {index + 1}</h4>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeCustomItem(index)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <Label>Item Name</Label>
+                            <Input
+                              value={item.name}
+                              onChange={(e) => updateCustomItem(index, 'name', e.target.value)}
+                              placeholder="e.g., Custom Dining Chair"
+                              className={errors[`custom_item_${index}_name`] ? 'border-red-500' : ''}
+                            />
+                            {errors[`custom_item_${index}_name`] && (
+                              <p className="text-red-500 text-xs mt-1">{errors[`custom_item_${index}_name`]}</p>
+                            )}
+                          </div>
+                          <div>
+                            <Label>Order Number</Label>
+                            <Input
+                              value={item.order_number}
+                              onChange={(e) => updateCustomItem(index, 'order_number', e.target.value)}
+                              placeholder="e.g., ORD-2025-001"
+                              className={errors[`custom_item_${index}_order_number`] ? 'border-red-500' : ''}
+                            />
+                            {errors[`custom_item_${index}_order_number`] && (
+                              <p className="text-red-500 text-xs mt-1">{errors[`custom_item_${index}_order_number`]}</p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 mt-3">
+                          <div>
+                            <Label>Item Code (Optional)</Label>
+                            <Input
+                              value={item.item_code}
+                              onChange={(e) => updateCustomItem(index, 'item_code', e.target.value)}
+                              placeholder="e.g., CDC-001"
+                            />
+                          </div>
+                          <div>
+                            <Label>Customer Name (Optional)</Label>
+                            <Input
+                              value={item.customer_name}
+                              onChange={(e) => updateCustomItem(index, 'customer_name', e.target.value)}
+                              placeholder="e.g., ABC Company"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Shop Drawing Upload */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <Upload className="w-5 h-5 mr-2" />
+                  Shop Drawings
+                </div>
+                <Badge variant="outline">
+                  {form.shop_drawings.length} files
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {/* File Upload Area */}
+                <div className="relative border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors">
+                  <Upload className="w-8 h-8 mx-auto text-slate-500 mb-4" />
+                  <div className="space-y-2">
+                    <p className="text-sm text-slate-600">
+                      Upload shop drawings, specifications, or reference documents
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      PDF, DWG, DXF, JPG, PNG files up to 10MB each
+                    </p>
+                  </div>
+                  <input
+                    type="file"
+                    multiple
+                    accept=".pdf,.dwg,.dxf,.jpg,.jpeg,.png"
+                    onChange={handleFileUpload}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    style={{ position: 'absolute', inset: 0 }}
+                  />
+                  <Button variant="outline" className="mt-3 pointer-events-none">
+                    <Upload className="w-4 h-4 mr-2" />
+                    Choose Files
+                  </Button>
+                </div>
+
+                {/* Uploaded Files List */}
+                {form.shop_drawings.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium">Uploaded Files</h4>
+                    {form.shop_drawings.map((file) => (
+                      <div key={file.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-md">
+                        <div className="flex items-center space-x-3">
+                          <File className="w-4 h-4 text-slate-500" />
+                          <div>
+                            <p className="text-sm font-medium">{file.name}</p>
+                            <p className="text-xs text-slate-500">
+                              {(file.file.size / 1024 / 1024).toFixed(2)} MB
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeFile(file.id)}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Session Summary */}
+          {(form.selected_prototypes.length > 0 || form.custom_items.length > 0) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <CheckCircle2 className="w-5 h-5 mr-2" />
+                  Session Summary
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="text-sm">
+                  <strong>Session:</strong> {form.session_name || 'Untitled Session'}
+                </div>
+                <div className="text-sm">
+                  <strong>Manufacturer:</strong> {
+                    manufacturers.find(m => m.id === form.factory_id)?.name || 'Not selected'
+                  }
+                </div>
+                <div className="text-sm">
+                  <strong>Date & Time:</strong> {
+                    form.scheduled_date && form.scheduled_time
+                      ? `${new Date(form.scheduled_date).toLocaleDateString()} at ${form.scheduled_time}`
+                      : 'Not scheduled'
+                  }
+                </div>
+                <div className="text-sm">
+                  <strong>Items:</strong> {form.selected_prototypes.length + form.custom_items.length} total ({form.selected_prototypes.length} prototypes, {form.custom_items.length} custom)
+                </div>
+                <div className="text-sm">
+                  <strong>Participants:</strong> {
+                    form.participants.filter(p => p.name.trim()).length
+                  } people ({
+                    form.participants.filter(p => p.can_approve).length
+                  } with approval rights)
+                </div>
+                
+                {(form.selected_prototypes.length > 0 || form.custom_items.length > 0) && (
+                  <div className="pt-3 border-t border-gray-200">
+                    {form.selected_prototypes.length > 0 && (
+                      <div className="mb-3">
+                        <div className="text-xs text-slate-600 mb-2">Selected Prototypes:</div>
+                        <div className="space-y-1">
+                          {form.selected_prototypes.map(id => {
+                            const prototype = availablePrototypes.find(p => p.id === id)
+                            return prototype ? (
+                              <div key={id} className="text-xs text-slate-900">
+                                • {prototype.name} ({prototype.order_number})
+                              </div>
+                            ) : null
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {form.custom_items.length > 0 && (
+                      <div>
+                        <div className="text-xs text-slate-600 mb-2">Custom Items:</div>
+                        <div className="space-y-1">
+                          {form.custom_items.map((item) => (
+                            <div key={item.id} className="text-xs text-slate-900">
+                              • {item.name || 'Untitled'} ({item.order_number || 'No order #'})
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}

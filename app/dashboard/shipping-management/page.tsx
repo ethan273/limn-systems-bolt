@@ -1,0 +1,267 @@
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Truck, Package, MapPin, Calendar, Search, Download, Plus } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
+import { safeFormatString } from '@/lib/utils/string-helpers'
+
+interface Shipment {
+  id: string
+  order_id: string
+  tracking_number: string
+  carrier: string
+  status: string
+  ship_date: string
+  delivery_date: string
+  destination_address: string
+  order: {
+    order_number: string
+    customer: {
+      name: string
+      city: string
+      state: string
+    } | null
+  }
+}
+
+export default function ShippingManagementPage() {
+  const [shipments, setShipments] = useState<Shipment[]>([])
+  const [loading, setLoading] = useState(true)
+  const [searchTerm, setSearchTerm] = useState('')
+  const supabase = createClient()
+
+  const fetchShipments = useCallback(async () => {
+    try {
+      const { data: orders, error } = await supabase
+        .from('orders')
+        .select(`
+          id,
+          order_number,
+          status,
+          shipping_date,
+          delivery_date,
+          tracking_number,
+          shipping_carrier,
+          customer:customers(
+            name,
+            city,
+            state,
+            shipping_address
+          )
+        `)
+        .in('status', ['shipped', 'in_transit', 'delivered', 'ready_to_ship'])
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+
+      // Transform orders to shipments format
+      const transformedShipments = (orders || []).map(order => ({
+        id: order.id,
+        order_id: order.id,
+        tracking_number: order.tracking_number || 'Not assigned',
+        carrier: order.shipping_carrier || 'TBD',
+        status: order.status,
+        ship_date: order.shipping_date,
+        delivery_date: order.delivery_date,
+        destination_address: order.customer && order.customer[0] ? 
+          (order.customer[0].shipping_address || `${order.customer[0].city}, ${order.customer[0].state}`) : 
+          'Unknown',
+        order: {
+          order_number: order.order_number,
+          customer: order.customer ? order.customer[0] : null
+        }
+      }))
+
+      setShipments(transformedShipments)
+    } catch (error) {
+      console.error('Error fetching shipments:', error)
+    } finally {
+      setLoading(false)
+    }
+  }, [supabase])
+
+  useEffect(() => {
+    fetchShipments()
+  }, [fetchShipments])
+
+  const getStatusBadge = (status: string) => {
+    const colors: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+      'ready_to_ship': 'secondary',
+      'shipped': 'default',
+      'in_transit': 'outline',
+      'delivered': 'secondary',
+      'delayed': 'destructive'
+    }
+    return <Badge variant={colors[status] || 'default'}>{safeFormatString(status, 'pending')}</Badge>
+  }
+
+  const filteredShipments = shipments.filter(shipment =>
+    shipment.tracking_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    shipment.order.order_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    shipment.order.customer?.name?.toLowerCase().includes(searchTerm.toLowerCase()) || false
+  )
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="container mx-auto p-6">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold">Shipping Management</h1>
+        <div className="flex gap-2">
+          <Button variant="outline">
+            <Download className="w-4 h-4 mr-2" />
+            Export
+          </Button>
+          <Button>
+            <Plus className="w-4 h-4 mr-2" />
+            Create Shipment
+          </Button>
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Package className="w-4 h-4" />
+              Ready to Ship
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {shipments.filter(s => s.status === 'ready_to_ship').length}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Truck className="w-4 h-4" />
+              In Transit
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">
+              {shipments.filter(s => s.status === 'in_transit').length}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <MapPin className="w-4 h-4" />
+              Delivered
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">
+              {shipments.filter(s => s.status === 'delivered').length}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Calendar className="w-4 h-4" />
+              This Week
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {shipments.filter(s => {
+                const shipDate = new Date(s.ship_date)
+                const weekAgo = new Date()
+                weekAgo.setDate(weekAgo.getDate() - 7)
+                return shipDate >= weekAgo
+              }).length}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Search */}
+      <div className="mb-4">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 w-4 h-4" />
+          <Input
+            placeholder="Search by tracking number, order, or customer..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+      </div>
+
+      {/* Shipments Table */}
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Order #</TableHead>
+                <TableHead>Customer</TableHead>
+                <TableHead>Tracking</TableHead>
+                <TableHead>Carrier</TableHead>
+                <TableHead>Destination</TableHead>
+                <TableHead>Ship Date</TableHead>
+                <TableHead>Delivery Date</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredShipments.map((shipment) => (
+                <TableRow key={shipment.id}>
+                  <TableCell className="font-medium">
+                    {shipment.order.order_number}
+                  </TableCell>
+                  <TableCell>{shipment.order.customer?.name || 'Unknown'}</TableCell>
+                  <TableCell>
+                    <code className="text-xs">{shipment.tracking_number}</code>
+                  </TableCell>
+                  <TableCell>{shipment.carrier}</TableCell>
+                  <TableCell className="text-sm">
+                    {shipment.destination_address}
+                  </TableCell>
+                  <TableCell>
+                    {shipment.ship_date ? 
+                      new Date(shipment.ship_date).toLocaleDateString() : 
+                      '-'}
+                  </TableCell>
+                  <TableCell>
+                    {shipment.delivery_date ? 
+                      new Date(shipment.delivery_date).toLocaleDateString() : 
+                      'TBD'}
+                  </TableCell>
+                  <TableCell>{getStatusBadge(shipment.status)}</TableCell>
+                  <TableCell>
+                    <Button size="sm" variant="ghost">Track</Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+
+          {filteredShipments.length === 0 && (
+            <div className="p-12 text-center">
+              <Package className="w-12 h-12 mx-auto mb-4 text-slate-500" />
+              <p className="text-slate-500">No shipments found</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}

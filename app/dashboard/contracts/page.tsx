@@ -1,0 +1,800 @@
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Badge } from '@/components/ui/badge'
+import { PageWrapper } from '@/components/layouts/page-wrapper'
+import { EmptyState } from '@/components/ui/empty-state'
+import { ExportButton } from '@/components/ui/export-button'
+import { 
+  FileText, 
+  Plus, 
+  Eye, 
+  Send,
+  Download,
+  Clock,
+  CheckCircle,
+  AlertCircle,
+  Users,
+  Search,
+  Trash2
+} from 'lucide-react'
+
+interface PandaDocDocument {
+  id: string
+  pandadoc_document_id: string
+  name: string
+  document_type: 'nda' | 'msa' | 'sow' | 'contract' | 'proposal'
+  status: 'draft' | 'sent' | 'viewed' | 'completed' | 'cancelled' | 'rejected'
+  customer_name?: string
+  customer_email?: string
+  recipient_email: string
+  recipient_name: string
+  created_at: string
+  updated_at: string
+  completed_at?: string
+  expires_at?: string
+  document_url?: string
+  download_url?: string
+  template_name?: string
+  order_id?: string
+  order_number?: string
+  metadata?: Record<string, unknown>
+}
+
+interface PandaDocTemplate {
+  id: string
+  pandadoc_template_id: string
+  name: string
+  template_type: 'nda' | 'msa' | 'sow' | 'contract'
+  description?: string
+  tags: string[]
+  is_active: boolean
+}
+
+interface CreateDocumentForm {
+  templateId: string
+  recipientName: string
+  recipientEmail: string
+  customerEmail: string
+  orderId: string
+  documentName: string
+  customFields: Record<string, string>
+}
+
+export default function ContractsPage() {
+  const [documents, setDocuments] = useState<PandaDocDocument[]>([])
+  const [templates, setTemplates] = useState<PandaDocTemplate[]>([])
+  const [filteredDocuments, setFilteredDocuments] = useState<PandaDocDocument[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [searchTerm, setSearchTerm] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState('all')
+  
+  // Modal states
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [showTemplateModal, setShowTemplateModal] = useState(false)
+  
+  // Form state
+  const [createForm, setCreateForm] = useState<CreateDocumentForm>({
+    templateId: '',
+    recipientName: '',
+    recipientEmail: '',
+    customerEmail: '',
+    orderId: '',
+    documentName: '',
+    customFields: {}
+  })
+
+  const applyFilters = useCallback(() => {
+    let filtered = [...documents]
+
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(doc => doc.status === statusFilter)
+    }
+
+    if (typeFilter !== 'all') {
+      filtered = filtered.filter(doc => doc.document_type === typeFilter)
+    }
+
+    if (searchTerm) {
+      filtered = filtered.filter(doc =>
+        (doc.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (doc.recipient_name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (doc.recipient_email || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (doc.order_number && (doc.order_number || "").toLowerCase().includes(searchTerm.toLowerCase()))
+      )
+    }
+
+    setFilteredDocuments(filtered)
+  }, [documents, statusFilter, typeFilter, searchTerm])
+
+  useEffect(() => {
+    loadDocuments()
+    loadTemplates()
+  }, [])
+
+  useEffect(() => {
+    applyFilters()
+  }, [documents, searchTerm, statusFilter, typeFilter, applyFilters])
+
+  const loadDocuments = async () => {
+    setLoading(true)
+    try {
+      const response = await fetch('/api/pandadoc/documents', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include'
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || `Failed to load documents: ${response.status}`)
+      }
+
+      const data = await response.json()
+      if (data.success && Array.isArray(data.documents)) {
+        setDocuments(data.documents)
+        setError('')
+      } else {
+        throw new Error('Invalid response format')
+      }
+    } catch (error) {
+      console.error('Failed to load documents:', error)
+      setError('Failed to load documents. Please try again.')
+      setDocuments([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const loadTemplates = async () => {
+    try {
+      const response = await fetch('/api/pandadoc/templates', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include'
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || `Failed to load templates: ${response.status}`)
+      }
+
+      const data = await response.json()
+      if (data.success && Array.isArray(data.templates)) {
+        setTemplates(data.templates)
+      } else {
+        throw new Error('Invalid response format')
+      }
+    } catch (error) {
+      console.error('Failed to load templates:', error)
+      setTemplates([])
+    }
+  }
+
+  const refreshData = async () => {
+    await Promise.all([loadDocuments(), loadTemplates()])
+  }
+
+  const handleCreateDocument = async () => {
+    try {
+      setLoading(true)
+      
+      const response = await fetch('/api/pandadoc/documents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(createForm)
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to create document')
+      }
+
+      await response.json()
+      alert('Document created successfully!')
+      setShowCreateModal(false)
+      setCreateForm({
+        templateId: '',
+        recipientName: '',
+        recipientEmail: '',
+        customerEmail: '',
+        orderId: '',
+        documentName: '',
+        customFields: {}
+      })
+      loadDocuments()
+    } catch (error) {
+      console.error('Error creating document:', error)
+      alert('Failed to create document')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSendDocument = async (documentId: string) => {
+    try {
+      const response = await fetch(`/api/pandadoc/documents/${documentId}/send`, {
+        method: 'POST'
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to send document')
+      }
+
+      alert('Document sent successfully!')
+      loadDocuments()
+    } catch (error) {
+      console.error('Error sending document:', error)
+      alert('Failed to send document')
+    }
+  }
+
+  const handleDownloadDocument = async (documentId: string, documentName: string) => {
+    try {
+      const response = await fetch(`/api/pandadoc/documents/${documentId}/download`)
+      
+      if (!response.ok) {
+        throw new Error('Failed to download document')
+      }
+
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${documentName}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+    } catch (error) {
+      console.error('Error downloading document:', error)
+      alert('Failed to download document')
+    }
+  }
+
+  const handleDeleteDocument = async (documentId: string) => {
+    if (!confirm('Are you sure you want to delete this document?')) return
+
+    try {
+      const response = await fetch(`/api/pandadoc/documents/${documentId}`, {
+        method: 'DELETE'
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to delete document')
+      }
+
+      alert('Document deleted successfully!')
+      loadDocuments()
+    } catch (error) {
+      console.error('Error deleting document:', error)
+      alert('Failed to delete document')
+    }
+  }
+
+  const getStatusColor = (status: string) => {
+    const colors: Record<string, string> = {
+      draft: 'bg-gray-100 text-gray-800',
+      sent: 'bg-blue-100 text-blue-800',
+      viewed: 'bg-yellow-100 text-yellow-800',
+      completed: 'bg-green-100 text-green-800',
+      cancelled: 'bg-red-100 text-red-800',
+      rejected: 'bg-red-100 text-red-800'
+    }
+    return colors[status] || colors.draft
+  }
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'completed': return <CheckCircle className="w-4 h-4" />
+      case 'cancelled':
+      case 'rejected': return <AlertCircle className="w-4 h-4" />
+      case 'sent': return <Send className="w-4 h-4" />
+      case 'viewed': return <Eye className="w-4 h-4" />
+      default: return <Clock className="w-4 h-4" />
+    }
+  }
+
+  const getTypeLabel = (type: string) => {
+    const labels: Record<string, string> = {
+      nda: 'NDA',
+      msa: 'MSA',
+      sow: 'SOW',
+      contract: 'Contract',
+      proposal: 'Proposal'
+    }
+    return labels[type] || type.toUpperCase()
+  }
+
+  if (loading && documents.length === 0) {
+    return (
+      <div className="space-y-6">
+        <div className="animate-pulse">
+          <div className="h-8 bg-gray-200 rounded w-1/3 mb-6"></div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="h-24 bg-gray-200 rounded"></div>
+            ))}
+          </div>
+          <div className="space-y-4">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="h-20 bg-gray-200 rounded"></div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <PageWrapper 
+      title="Contract Management"
+      description="Manage contracts, NDAs, MSAs, and SOWs with PandaDoc integration"
+    >
+      <div className="space-y-6">
+        {/* Header Actions */}
+        <div className="flex items-center justify-between -mt-4">
+          <div></div>
+          <div className="flex items-center gap-3">
+            <ExportButton
+              data={filteredDocuments.map(doc => ({
+                document_name: doc.name,
+                document_type: doc.document_type,
+                status: doc.status,
+                recipient_name: doc.recipient_name,
+                recipient_email: doc.recipient_email,
+                customer_name: doc.customer_name,
+                order_number: doc.order_number,
+                created_at: doc.created_at,
+                updated_at: doc.updated_at,
+                completed_at: doc.completed_at,
+                expires_at: doc.expires_at,
+                template_name: doc.template_name
+              }))}
+              type="contracts"
+              title="Contracts Export"
+              defaultColumns={['document_name', 'document_type', 'status', 'recipient_name', 'created_at', 'completed_at']}
+            />
+            <Button onClick={() => setShowCreateModal(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              New Document
+            </Button>
+          </div>
+        </div>
+
+        {/* Error Display */}
+        {error && (
+          <Card className="border-red-200 bg-red-50">
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <AlertCircle className="w-5 h-5 text-red-600 mr-2" />
+                  <span className="text-red-800">{error}</span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={refreshData}
+                  className="text-red-700 border-red-300 hover:bg-red-100"
+                >
+                  Try Again
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-900 flex items-center">
+              <FileText className="w-4 h-4 mr-2" />
+              Total Documents
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-slate-900">{documents.length}</div>
+            <div className="text-sm text-primary">All time</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-900 flex items-center">
+              <Clock className="w-4 h-4 mr-2" />
+              Pending Signatures
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-slate-900">
+              {documents.filter(d => ['sent', 'viewed'].includes(d.status)).length}
+            </div>
+            <div className="text-sm text-amber">Need attention</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-900 flex items-center">
+              <CheckCircle className="w-4 h-4 mr-2" />
+              Completed
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-slate-900">
+              {documents.filter(d => d.status === 'completed').length}
+            </div>
+            <div className="text-sm text-primary">Signed & sealed</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-900 flex items-center">
+              <Users className="w-4 h-4 mr-2" />
+              Templates
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-slate-900">{templates.length}</div>
+            <div className="text-sm text-primary">Active templates</div>
+          </CardContent>
+        </Card>
+        </div>
+
+        {/* Filters */}
+        <Card>
+        <CardContent className="pt-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-900 mb-2">Search Documents</label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-900 w-4 h-4" />
+                <input
+                  type="text"
+                  placeholder="Search by name, recipient..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-stone-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-slate-900 mb-2">Status</label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-full px-3 py-2 border border-stone-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                  <SelectValue placeholder="All Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="sent">Sent</SelectItem>
+                  <SelectItem value="viewed">Viewed</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="cancelled">Cancelled</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-900 mb-2">Document Type</label>
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger className="w-full px-3 py-2 border border-stone-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                  <SelectValue placeholder="All Types" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="nda">NDA</SelectItem>
+                  <SelectItem value="msa">MSA</SelectItem>
+                  <SelectItem value="sow">SOW</SelectItem>
+                  <SelectItem value="contract">Contract</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-end">
+              <Button 
+                variant="outline" 
+                className="w-full"
+                onClick={() => setShowTemplateModal(true)}
+              >
+                <FileText className="w-4 h-4 mr-2" />
+                Manage Templates
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+        </Card>
+
+        {/* Documents Table */}
+        <Card>
+        <CardHeader>
+          <CardTitle>Documents</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Document</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Recipient</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredDocuments.map((document) => (
+                  <TableRow key={document.id}>
+                    <TableCell>
+                      <div>
+                        <div className="font-medium text-slate-900">{document.name}</div>
+                        {document.order_number && (
+                          <div className="text-sm text-slate-900">Order: {document.order_number}</div>
+                        )}
+                        {document.template_name && (
+                          <div className="text-xs text-slate-900">Template: {document.template_name}</div>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="text-xs">
+                        {getTypeLabel(document.document_type)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div>
+                        <div className="font-medium text-slate-900">{document.recipient_name}</div>
+                        <div className="text-sm text-slate-900">{document.recipient_email}</div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(document.status)}`}>
+                        {getStatusIcon(document.status)}
+                        <span className="ml-1 capitalize">{document.status}</span>
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm">
+                        {new Date(document.created_at).toLocaleDateString()}
+                      </div>
+                      {document.completed_at && (
+                        <div className="text-xs text-green-600">
+                          Completed: {new Date(document.completed_at).toLocaleDateString()}
+                        </div>
+                      )}
+                      {document.expires_at && document.status !== 'completed' && (
+                        <div className="text-xs text-amber">
+                          Expires: {new Date(document.expires_at).toLocaleDateString()}
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center space-x-2">
+                        {document.document_url && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => window.open(document.document_url, '_blank')}
+                            title="View Document"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </Button>
+                        )}
+                        
+                        {document.status === 'draft' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleSendDocument(document.id)}
+                            title="Send Document"
+                          >
+                            <Send className="w-4 h-4" />
+                          </Button>
+                        )}
+                        
+                        {document.download_url && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleDownloadDocument(document.id, document.name)}
+                            title="Download PDF"
+                          >
+                            <Download className="w-4 h-4" />
+                          </Button>
+                        )}
+                        
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDeleteDocument(document.id)}
+                          title="Delete Document"
+                          className="text-red-600 hover:text-red-800"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+        </Card>
+
+        {filteredDocuments.length === 0 && !loading && (
+          <EmptyState
+            icon={FileText}
+            title="No documents found"
+            description={
+              searchTerm || statusFilter !== 'all' || typeFilter !== 'all'
+                ? 'Try adjusting your search or filter criteria'
+                : 'Create your first document to get started'
+            }
+            actionLabel={!(searchTerm || statusFilter !== 'all' || typeFilter !== 'all') ? "New Document" : undefined}
+            onAction={!(searchTerm || statusFilter !== 'all' || typeFilter !== 'all') ? () => setShowCreateModal(true) : undefined}
+          />
+        )}
+
+      {/* Create Document Modal */}
+      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Create New Document</DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Template</Label>
+                <Select value={createForm.templateId} onValueChange={(value) => 
+                  setCreateForm({...createForm, templateId: value})
+                }>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select template" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {templates.map(template => (
+                      <SelectItem key={template.id} value={template.pandadoc_template_id}>
+                        {template.name} ({(template.template_type || "").toUpperCase()})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <Label>Document Name</Label>
+                <Input
+                  placeholder="Enter document name"
+                  value={createForm.documentName}
+                  onChange={(e) => setCreateForm({...createForm, documentName: e.target.value})}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Recipient Name</Label>
+                <Input
+                  placeholder="John Smith"
+                  value={createForm.recipientName}
+                  onChange={(e) => setCreateForm({...createForm, recipientName: e.target.value})}
+                />
+              </div>
+              
+              <div>
+                <Label>Recipient Email</Label>
+                <Input
+                  type="email"
+                  placeholder="john@company.com"
+                  value={createForm.recipientEmail}
+                  onChange={(e) => setCreateForm({...createForm, recipientEmail: e.target.value})}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Customer Email (optional)</Label>
+                <Input
+                  type="email"
+                  placeholder="customer@company.com"
+                  value={createForm.customerEmail}
+                  onChange={(e) => setCreateForm({...createForm, customerEmail: e.target.value})}
+                />
+              </div>
+              
+              <div>
+                <Label>Related Order ID (optional)</Label>
+                <Input
+                  placeholder="ORD-2025-001"
+                  value={createForm.orderId}
+                  onChange={(e) => setCreateForm({...createForm, orderId: e.target.value})}
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateModal(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleCreateDocument}
+              disabled={!createForm.templateId || !createForm.recipientEmail || !createForm.documentName}
+            >
+              Create Document
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Templates Modal */}
+      <Dialog open={showTemplateModal} onOpenChange={setShowTemplateModal}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Document Templates</DialogTitle>
+          </DialogHeader>
+          
+          <div className="py-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {templates.map(template => (
+                <Card key={template.id}>
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="text-sm">{template.name}</CardTitle>
+                        <Badge variant="outline" className="mt-1 text-xs">
+                          {(template.template_type || "").toUpperCase()}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Badge variant={template.is_active ? 'default' : 'secondary'}>
+                          {template.is_active ? 'Active' : 'Inactive'}
+                        </Badge>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-slate-600 mb-2">{template.description}</p>
+                    <div className="flex flex-wrap gap-1">
+                      {(template.tags || []).map(tag => (
+                        <Badge key={tag} variant="outline" className="text-xs">
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowTemplateModal(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      </div>
+    </PageWrapper>
+  )
+}

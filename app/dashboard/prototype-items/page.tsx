@@ -1,0 +1,510 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { PageHeader } from '@/components/ui/page-header'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
+// import { Badge } from '@/components/ui/badge'
+import { Search, Plus, Package, Settings } from 'lucide-react'
+
+interface Collection {
+  id: string
+  name: string
+  prefix: string
+}
+
+interface Item {
+  id: string
+  name: string
+  sku_base: string
+  sku?: string
+  type: 'Concept' | 'Prototype' | 'Production Ready'
+  prototype_status: string
+  collection_id: string
+  collections?: Collection
+  description?: string
+  base_price: number
+  is_active: boolean
+  created_at: string
+  project_manager?: string
+  prototype_cost?: number
+}
+
+export default function PrototypeItemsPage() {
+  const router = useRouter()
+  const [items, setItems] = useState<Item[]>([])
+  const [collections, setCollections] = useState<Collection[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [searchTerm, setSearchTerm] = useState('')
+  const [selectedCollection, setSelectedCollection] = useState('all')
+  const [showCreateForm, setShowCreateForm] = useState(false)
+
+  // Create form state
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    collection_id: '',
+    base_price: '',
+    type: 'Prototype' as const,
+    prototype_status: 'not_started',
+    project_manager: ''
+  })
+
+  useEffect(() => {
+    Promise.all([
+      fetchItems(),
+      fetchCollections()
+    ])
+  }, [])
+
+  const fetchItems = async () => {
+    try {
+      setLoading(true)
+      // Filter items with type 'Prototype'
+      const response = await fetch('/api/items?type=Prototype')
+      if (!response.ok) throw new Error('Failed to fetch items')
+
+      const data = await response.json()
+      setItems(data.data || [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load items')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchCollections = async () => {
+    try {
+      const response = await fetch('/api/collections')
+      if (!response.ok) throw new Error('Failed to fetch collections')
+
+      const data = await response.json()
+      setCollections(data.data || [])
+    } catch (err) {
+      console.error('Error fetching collections:', err)
+    }
+  }
+
+  const handleCreateItem = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      // Generate proper SKU using collection prefix
+      const collection = collections.find(c => c.id === formData.collection_id)
+      const createSKUCode = (text: string, fallback = 'UNK'): string => {
+        if (!text || typeof text !== 'string') return fallback
+        return text.trim().substring(0, 3).toUpperCase() || fallback
+      }
+
+      const collectionCode = collection?.prefix || createSKUCode(collection?.name || 'PROTO', 'PTR')
+      const itemCode = createSKUCode(formData.name, 'ITM')
+      const timestamp = Date.now().toString().slice(-3)
+      const sku_base = `${collectionCode}-${itemCode}-${timestamp}`
+
+      const dataToSend = {
+        ...formData,
+        sku_base,
+        base_price: parseFloat(formData.base_price) || 0
+      }
+
+      console.log('Creating prototype item with data:', dataToSend)
+
+      const response = await fetch('/api/items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dataToSend)
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        console.error('API Error:', errorData)
+        throw new Error(errorData.error || 'Failed to create item')
+      }
+
+      const result = await response.json()
+      console.log('Successfully created prototype item:', result)
+
+      setShowCreateForm(false)
+      setFormData({
+        name: '',
+        description: '',
+        collection_id: '',
+        base_price: '',
+        type: 'Prototype',
+        prototype_status: 'not_started',
+        project_manager: ''
+      })
+      setError('') // Clear any previous errors
+      await fetchItems()
+    } catch (err) {
+      console.error('Error creating prototype item:', err)
+      setError(err instanceof Error ? err.message : 'Failed to create item')
+    }
+  }
+
+  const filteredItems = items.filter(item => {
+    // Debug log to catch undefined prototype_status
+    if (item.prototype_status === undefined || item.prototype_status === null) {
+      console.log('Found item with undefined/null prototype_status:', item)
+    }
+
+    const matchesCollection = selectedCollection === 'all' || item.collection_id === selectedCollection
+    const matchesSearch = searchTerm === '' ||
+      (item.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (item.sku_base || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (item.collections?.name || "").toLowerCase().includes(searchTerm.toLowerCase())
+
+    return matchesCollection && matchesSearch
+  })
+
+  // const getStatusBadge = (status: string) => {
+  //   const statusColors = {
+  //     'not_started': 'bg-gray-100 text-slate-900',
+  //     'design': 'bg-blue-100 text-blue-800',
+  //     'factory_queue': 'bg-yellow-100 text-yellow-800',
+  //     'in_production': 'bg-orange-100 text-orange-800',
+  //     'testing': 'bg-purple-100 text-purple-800',
+  //     'review': 'bg-indigo-100 text-indigo-800',
+  //     'approved': 'bg-green-100 text-green-800',
+  //     'rejected': 'bg-red-100 text-red-800',
+  //     'completed': 'bg-emerald-100 text-emerald-800'
+  //   }
+  //   return statusColors[status as keyof typeof statusColors] || statusColors.not_started
+  // }
+
+  const updateItemType = async (itemId: string, newType: string) => {
+    try {
+      const response = await fetch(`/api/items/${itemId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: newType })
+      })
+
+      if (!response.ok) throw new Error('Failed to update item type')
+
+      // Refresh the list to remove the item (since it no longer belongs on this page)
+      await fetchItems()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update item type')
+    }
+  }
+
+  const updatePrototypeStatus = async (itemId: string, newStatus: string) => {
+    try {
+      const response = await fetch(`/api/items/${itemId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prototype_status: newStatus })
+      })
+
+      if (!response.ok) throw new Error('Failed to update prototype status')
+
+      // Refresh the list
+      await fetchItems()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update prototype status')
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Prototype Items"
+        description="Items ready for factory prototyping and testing"
+      />
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-600">
+              Total Prototypes
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">
+              {items.length}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-600">
+              In Production
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-600">
+              {items.filter(i => (i.prototype_status || 'not_started') === 'in_production').length}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-600">
+              Approved
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">
+              {items.filter(i => (i.prototype_status || 'not_started') === 'approved').length}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-600">
+              Ready for Queue
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-purple-600">
+              {items.filter(i => (i.prototype_status || 'not_started') === 'not_started').length}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Controls */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="flex flex-col md:flex-row gap-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 h-4 w-4" />
+            <Input
+              placeholder="Search prototype items..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 w-full md:w-80"
+            />
+          </div>
+
+          <Select value={selectedCollection} onValueChange={setSelectedCollection}>
+            <SelectTrigger className="w-full md:w-48">
+              <SelectValue placeholder="Filter by collection" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Collections</SelectItem>
+              {collections.map(collection => (
+                <SelectItem key={collection.id} value={collection.id}>{collection.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <Button
+          onClick={() => setShowCreateForm(true)}
+          className="bg-blue-600 hover:bg-blue-700"
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Add Prototype Item
+        </Button>
+      </div>
+
+      {/* Items Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Package className="h-5 w-5" />
+            Prototype Items ({filteredItems.length})
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <div>Loading prototype items...</div>
+            </div>
+          ) : error ? (
+            <div className="text-center py-8 text-red-500">
+              Error: {error}
+            </div>
+          ) : filteredItems.length === 0 ? (
+            <div className="text-center py-8 text-slate-500">
+              No prototype items found.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>SKU</TableHead>
+                  <TableHead>Collection</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Prototype Status</TableHead>
+                  <TableHead>Price</TableHead>
+                  <TableHead>Manager</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead className="w-12">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredItems.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell>
+                      <div>
+                        <div className="font-medium">{item.name}</div>
+                        {item.description && (
+                          <div className="text-sm text-slate-500 mt-1">{item.description}</div>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <span className="font-mono text-sm">{item.sku_base}</span>
+                      {item.sku && item.sku !== item.sku_base && (
+                        <div className="text-xs text-slate-500">Full: {item.sku}</div>
+                      )}
+                    </TableCell>
+                    <TableCell>{item.collections?.name}</TableCell>
+                    <TableCell>
+                      <Select
+                        value={item.type || 'Prototype'}
+                        onValueChange={(newType) => updateItemType(item.id, newType)}
+                      >
+                        <SelectTrigger className="w-32">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Concept">Concept</SelectItem>
+                          <SelectItem value="Prototype">Prototype</SelectItem>
+                          <SelectItem value="Production Ready">Production Ready</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      <Select
+                        value={item.prototype_status || 'not_started'}
+                        onValueChange={(newStatus) => updatePrototypeStatus(item.id, newStatus)}
+                      >
+                        <SelectTrigger className="w-36">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="not_started">Not Started</SelectItem>
+                          <SelectItem value="design">Design</SelectItem>
+                          <SelectItem value="factory_queue">Factory Queue</SelectItem>
+                          <SelectItem value="in_production">In Production</SelectItem>
+                          <SelectItem value="testing">Testing</SelectItem>
+                          <SelectItem value="review">Review</SelectItem>
+                          <SelectItem value="approved">Approved</SelectItem>
+                          <SelectItem value="rejected">Rejected</SelectItem>
+                          <SelectItem value="completed">Completed</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>${item.base_price?.toFixed(2)}</TableCell>
+                    <TableCell>{item.project_manager || '-'}</TableCell>
+                    <TableCell>
+                      {new Date(item.created_at).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => router.push(`/dashboard/items/${item.id}`)}
+                      >
+                        <Settings className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Create Form Modal */}
+      {showCreateForm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <Card className="max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <CardHeader>
+              <CardTitle>Add New Prototype Item</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleCreateItem} className="space-y-4">
+                <div>
+                  <Label htmlFor="name">Name *</Label>
+                  <Input
+                    id="name"
+                    value={formData.name}
+                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="collection_id">Collection *</Label>
+                  <Select
+                    value={formData.collection_id}
+                    onValueChange={(value) => setFormData({...formData, collection_id: value})}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select collection" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {collections.map(collection => (
+                        <SelectItem key={collection.id} value={collection.id}>
+                          {collection.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label htmlFor="description">Description</Label>
+                  <Input
+                    id="description"
+                    value={formData.description}
+                    onChange={(e) => setFormData({...formData, description: e.target.value})}
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="base_price">Base Price *</Label>
+                  <Input
+                    id="base_price"
+                    type="number"
+                    step="0.01"
+                    value={formData.base_price}
+                    onChange={(e) => setFormData({...formData, base_price: e.target.value})}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="project_manager">Project Manager</Label>
+                  <Input
+                    id="project_manager"
+                    value={formData.project_manager}
+                    onChange={(e) => setFormData({...formData, project_manager: e.target.value})}
+                  />
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowCreateForm(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="submit" className="bg-blue-600 hover:bg-blue-700">
+                    Create Prototype Item
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </div>
+  )
+}

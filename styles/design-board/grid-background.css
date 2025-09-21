@@ -1,0 +1,97 @@
+/* Limn Systems Design Board - Dot Grid Background */
+/* Professional Mural-style grid with Limn branding */
+
+.limn-grid-background {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #f7f7f7; /* Limn signature background */
+  background-image: 
+    radial-gradient(circle, #64748b 1px, transparent 1px); /* Limn muted color for dots */
+  background-size: 20px 20px;
+  background-position: 0 0;
+  opacity: 0.6;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Adaptive grid for different zoom levels */
+.limn-grid-background.zoom-out {
+  background-size: 40px 40px;
+  opacity: 0.4;
+}
+
+.limn-grid-background.zoom-in {
+  background-size: 10px 10px;
+  opacity: 0.8;
+}
+
+/* Grid overlay for precise alignment */
+.limn-grid-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.limn-grid-overlay.visible {
+  opacity: 1;
+}
+
+.limn-grid-overlay svg {
+  width: 100%;
+  height: 100%;
+}
+
+.limn-grid-overlay .grid-line {
+  stroke: #88c0c0; /* Limn primary color */
+  stroke-width: 0.5;
+  opacity: 0.3;
+}
+
+.limn-grid-overlay .grid-major-line {
+  stroke: #88c0c0;
+  stroke-width: 1;
+  opacity: 0.5;
+}
+
+/* High contrast mode */
+@media (prefers-contrast: high) {
+  .limn-grid-background {
+    background-image: 
+      radial-gradient(circle, #334155 2px, transparent 2px);
+    opacity: 0.8;
+  }
+  
+  .limn-grid-overlay .grid-line {
+    stroke: #334155;
+    opacity: 0.6;
+  }
+  
+  .limn-grid-overlay .grid-major-line {
+    stroke: #334155;
+    opacity: 0.8;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .limn-grid-overlay {
+    transition: none;
+  }
+}
+
+/* Print styles */
+@media print {
+  .limn-grid-background,
+  .limn-grid-overlay {
+    display: none;
+  }
+}

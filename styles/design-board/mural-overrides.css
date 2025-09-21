@@ -1,0 +1,410 @@
+/* Limn Systems Design Board - Mural-style Overrides */
+/* Integrates seamlessly with Limn brand guidelines */
+
+/* Import Limn fonts */
+@import url('@fontsource/inter');
+@import url('@fontsource/kalam');
+
+/* Root variables matching Limn design system */
+.tldraw-limn-theme {
+  /* Limn brand colors */
+  --color-primary: #88c0c0;
+  --color-primary-dark: #6ba3a3;
+  --color-accent: #db7f38;
+  --color-glacier-50: #f2f7f7;
+  --color-glacier-100: #daecec;
+  --color-glacier-500: #88c0c0;
+  --color-glacier-600: #6ba3a3;
+  
+  /* Limn text colors */
+  --color-heading: #0f172a;
+  --color-body: #334155;
+  --color-secondary: #475569;
+  --color-muted: #64748b;
+  
+  /* Canvas background - Limn signature light gray */
+  --color-background: #f7f7f7;
+  --color-panel: #ffffff;
+  
+  /* Typography - Roboto font family */
+  font-family: 'Inter', 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Canvas styling with Limn grid */
+.tldraw-limn-theme .tl-canvas {
+  background-color: var(--color-background);
+  background-image: 
+    radial-gradient(circle, var(--color-muted) 1px, transparent 1px);
+  background-size: 20px 20px;
+  background-position: 0 0, 10px 10px;
+}
+
+/* Hide default tldraw UI elements */
+.tldraw-limn-theme .tlui-toolbar,
+.tldraw-limn-theme .tlui-menu-zone,
+.tldraw-limn-theme .tlui-help-menu,
+.tldraw-limn-theme .tlui-style-panel,
+.tldraw-limn-theme .tlui-zoom-menu,
+.tldraw-limn-theme .tlui-quick-actions {
+  display: none !important;
+}
+
+/* Custom shapes with Limn styling */
+.tldraw-limn-theme .tl-shape {
+  font-family: 'Inter', 'Roboto', sans-serif;
+}
+
+/* Sticky notes with Limn colors */
+.tldraw-limn-theme .tl-note {
+  background: linear-gradient(135deg, var(--color-glacier-50) 0%, #ffffff 100%);
+  border: 1px solid var(--color-glacier-100);
+  box-shadow: 0 4px 12px rgba(136, 192, 192, 0.15);
+  border-radius: 8px;
+  color: var(--color-heading);
+  font-weight: 500;
+}
+
+.tldraw-limn-theme .tl-note.yellow {
+  background: linear-gradient(135deg, #fef3c7 0%, #ffffff 100%);
+  border-color: #fde68a;
+  box-shadow: 0 4px 12px rgba(251, 191, 36, 0.15);
+}
+
+.tldraw-limn-theme .tl-note.blue {
+  background: linear-gradient(135deg, var(--color-glacier-50) 0%, #ffffff 100%);
+  border-color: var(--color-glacier-100);
+  box-shadow: 0 4px 12px rgba(136, 192, 192, 0.15);
+}
+
+.tldraw-limn-theme .tl-note.green {
+  background: linear-gradient(135deg, #dcfce7 0%, #ffffff 100%);
+  border-color: #bbf7d0;
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.15);
+}
+
+.tldraw-limn-theme .tl-note.orange {
+  background: linear-gradient(135deg, #fed7aa 0%, #ffffff 100%);
+  border-color: var(--color-accent);
+  box-shadow: 0 4px 12px rgba(219, 127, 56, 0.15);
+}
+
+/* Text elements */
+.tldraw-limn-theme .tl-text {
+  color: var(--color-heading);
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.tldraw-limn-theme .tl-text-input {
+  color: var(--color-heading);
+  font-family: 'Inter', 'Roboto', sans-serif;
+  font-weight: 500;
+  border: 2px solid var(--color-primary);
+  border-radius: 6px;
+  box-shadow: 0 0 0 3px rgba(136, 192, 192, 0.1);
+}
+
+/* Shapes and arrows with Limn styling */
+.tldraw-limn-theme .tl-arrow {
+  stroke: var(--color-primary);
+  stroke-width: 2px;
+}
+
+.tldraw-limn-theme .tl-arrow-head {
+  fill: var(--color-primary);
+  stroke: var(--color-primary);
+}
+
+.tldraw-limn-theme .tl-geo {
+  stroke: var(--color-primary);
+  stroke-width: 2px;
+  fill: rgba(136, 192, 192, 0.1);
+}
+
+.tldraw-limn-theme .tl-geo.selected {
+  stroke: var(--color-primary-dark);
+  stroke-width: 3px;
+}
+
+/* Selection indicators with Limn colors */
+.tldraw-limn-theme .tl-selection-bounds {
+  stroke: var(--color-primary);
+  stroke-width: 2px;
+  fill: rgba(136, 192, 192, 0.1);
+}
+
+.tldraw-limn-theme .tl-selection-handle {
+  fill: var(--color-primary);
+  stroke: #ffffff;
+  stroke-width: 2px;
+  border-radius: 4px;
+}
+
+/* Hover and focus states */
+.tldraw-limn-theme .tl-hoverable:hover {
+  stroke: var(--color-primary-dark);
+  stroke-width: 3px;
+}
+
+/* Custom cursors for collaboration */
+.limn-cursor {
+  position: absolute;
+  pointer-events: none;
+  z-index: 1000;
+  transition: all 0.2s ease-out;
+}
+
+.limn-cursor-svg {
+  width: 24px;
+  height: 24px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+}
+
+.limn-cursor-label {
+  background: var(--color-primary);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  margin-left: 12px;
+  margin-top: 2px;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* PDF annotation overlays */
+.limn-pdf-annotation {
+  position: absolute;
+  background: var(--color-accent);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: 'Inter', sans-serif;
+  box-shadow: 0 4px 12px rgba(219, 127, 56, 0.25);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  z-index: 500;
+}
+
+.limn-pdf-annotation:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(219, 127, 56, 0.3);
+}
+
+.limn-pdf-annotation-thread {
+  background: white;
+  border: 1px solid var(--color-glacier-100);
+  border-radius: 12px;
+  padding: 16px;
+  max-width: 320px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  font-family: 'Inter', sans-serif;
+}
+
+.limn-pdf-annotation-comment {
+  color: var(--color-body);
+  font-size: 14px;
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+
+.limn-pdf-annotation-meta {
+  color: var(--color-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Furniture catalog items */
+.limn-furniture-item {
+  background: white;
+  border: 1px solid var(--color-glacier-100);
+  border-radius: 8px;
+  padding: 12px;
+  cursor: grab;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.limn-furniture-item:hover {
+  border-color: var(--color-primary);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(136, 192, 192, 0.15);
+}
+
+.limn-furniture-item:active {
+  cursor: grabbing;
+  transform: scale(0.98);
+}
+
+.limn-furniture-title {
+  color: var(--color-heading);
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 4px;
+  font-family: 'Inter', sans-serif;
+}
+
+.limn-furniture-description {
+  color: var(--color-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  font-family: 'Inter', sans-serif;
+}
+
+/* Panel styling */
+.limn-panel {
+  background: white;
+  border: 1px solid var(--color-glacier-100);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(12px);
+  font-family: 'Inter', sans-serif;
+}
+
+.limn-panel-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--color-glacier-100);
+  display: flex;
+  align-items: center;
+  justify-content: between;
+}
+
+.limn-panel-title {
+  color: var(--color-heading);
+  font-weight: 700;
+  font-size: 16px;
+  margin: 0;
+}
+
+.limn-panel-content {
+  padding: 20px;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+}
+
+/* Custom scrollbar for panels */
+.limn-panel-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.limn-panel-content::-webkit-scrollbar-track {
+  background: var(--color-glacier-50);
+  border-radius: 3px;
+}
+
+.limn-panel-content::-webkit-scrollbar-thumb {
+  background: var(--color-primary);
+  border-radius: 3px;
+}
+
+.limn-panel-content::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary-dark);
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .limn-panel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border-radius: 0;
+    z-index: 1000;
+  }
+  
+  .limn-cursor-label {
+    display: none;
+  }
+  
+  .limn-furniture-item {
+    padding: 16px;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .tldraw-limn-theme .tl-note {
+    border-width: 2px;
+  }
+  
+  .limn-furniture-item {
+    border-width: 2px;
+  }
+  
+  .limn-panel {
+    border-width: 2px;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .limn-cursor,
+  .limn-furniture-item,
+  .limn-pdf-annotation {
+    transition: none;
+  }
+  
+  .limn-pdf-annotation:hover {
+    transform: none;
+  }
+  
+  .limn-furniture-item:hover {
+    transform: none;
+  }
+}
+
+/* Focus indicators for accessibility */
+.limn-furniture-item:focus-visible,
+.limn-pdf-annotation:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Loading states */
+.limn-loading-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-glacier-50) 0%,
+    var(--color-glacier-100) 50%,
+    var(--color-glacier-50) 100%
+  );
+  background-size: 200% 100%;
+  animation: limn-skeleton 1.5s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+@keyframes limn-skeleton {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* Error states */
+.limn-error {
+  color: #dc2626;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Success states */
+.limn-success {
+  color: #16a34a;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 500;
+}

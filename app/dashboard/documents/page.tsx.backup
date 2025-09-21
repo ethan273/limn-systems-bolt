@@ -1,0 +1,136 @@
+'use client'
+
+import { useState } from 'react'
+import { Upload, FileText, Search } from 'lucide-react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import DocumentUpload from '@/components/documents/DocumentUpload'
+import DocumentList from '@/components/documents/DocumentList'
+import { useDocuments } from '@/hooks/useDocuments'
+
+export default function DocumentsPage() {
+  const [refreshKey, setRefreshKey] = useState(0)
+  const { documents, loading } = useDocuments()
+
+  const handleUploadComplete = () => {
+    // Refresh the document list
+    setRefreshKey(prev => prev + 1)
+  }
+
+  // Calculate document stats
+  const documentStats = {
+    total: documents.length,
+    thisMonth: documents.filter(doc => {
+      const docDate = new Date(doc.created_at)
+      const now = new Date()
+      return docDate.getMonth() === now.getMonth() && docDate.getFullYear() === now.getFullYear()
+    }).length,
+    pending: documents.filter(doc => doc.status === 'pending').length,
+    storageUsed: documents.reduce((total, doc) => total + (doc.file_size || 0), 0)
+  }
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 B'
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* Header */}
+      <div>
+        <h1 className="text-4xl font-bold text-slate-900 mb-2">
+          Document Management
+        </h1>
+        <p className="text-gray-700 text-lg">
+          Upload, organize, and manage your documents securely across your projects and workflows.
+        </p>
+      </div>
+
+      {/* Statistics Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-600">
+              Total Documents
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-slate-900 mb-1">
+              {loading ? '...' : documentStats.total}
+            </div>
+            <div className="text-sm text-slate-500">
+              All documents
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-600">
+              This Month
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-slate-900 mb-1">
+              {loading ? '...' : documentStats.thisMonth}
+            </div>
+            <div className="text-sm text-primary">
+              New documents
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-600">
+              Pending Review
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-slate-900 mb-1">
+              {loading ? '...' : documentStats.pending}
+            </div>
+            <div className="text-sm text-amber">
+              Awaiting approval
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-slate-600">
+              Storage Used
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-slate-900 mb-1">
+              {loading ? '...' : formatFileSize(documentStats.storageUsed)}
+            </div>
+            <div className="text-sm text-slate-500">
+              Total storage
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Main Content */}
+      <Tabs defaultValue="documents" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="documents">All Documents</TabsTrigger>
+          <TabsTrigger value="upload">Upload New</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="documents" className="space-y-6">
+          <DocumentList />
+        </TabsContent>
+
+        <TabsContent value="upload" className="space-y-6">
+          <DocumentUpload onUploadComplete={handleUploadComplete} />
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}

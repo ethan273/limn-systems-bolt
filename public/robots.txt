@@ -1,0 +1,44 @@
+# Limn Systems - Robots.txt
+
+# Allow all robots to access the site
+User-agent: *
+Allow: /
+
+# Disallow sensitive areas
+Disallow: /api/
+Disallow: /dashboard/
+Disallow: /admin/
+Disallow: /auth/
+Disallow: /portal/
+Disallow: /_next/
+Disallow: /private/
+
+# Allow specific API endpoints for SEO
+Allow: /api/health
+Allow: /api/status
+
+# Sitemap location
+Sitemap: https://limnsystems.com/sitemap.xml
+
+# Crawl delay for politeness (optional)
+Crawl-delay: 1
+
+# Specific rules for major search engines
+User-agent: Googlebot
+Allow: /
+
+User-agent: Bingbot  
+Allow: /
+
+User-agent: Slurp
+Allow: /
+
+# Block any potential bad bots
+User-agent: ia_archiver
+Disallow: /
+
+User-agent: Wayback
+Disallow: /
+
+User-agent: archive.org_bot
+Disallow: /

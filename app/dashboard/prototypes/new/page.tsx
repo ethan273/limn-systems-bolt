@@ -1,0 +1,898 @@
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ArrowLeft, Save, AlertCircle, Beaker } from 'lucide-react'
+import { useToast } from '@/components/ui/use-toast'
+import Link from 'next/link'
+
+interface Collection {
+  id: string
+  name: string
+  prefix: string
+  description?: string
+}
+
+interface Item {
+  id: string
+  name: string
+  collection_id: string
+  base_price: number
+  description?: string
+  sku_base: string
+  dimensions?: Record<string, unknown>
+  status: string
+}
+
+interface Manufacturer {
+  id: string
+  name: string
+  contact_person?: string
+  contact_email?: string
+  specialties?: string[]
+  lead_time_days?: number
+  quality_rating?: number
+}
+
+// Material interfaces matching order form exactly
+interface FabricBrand {
+  id: string
+  name: string
+  price_modifier?: number
+  collections: Array<{
+    id: string
+    name: string
+    price_modifier?: number
+    colors: Array<{
+      id: string
+      name: string
+      price_modifier?: number
+    }>
+  }>
+}
+
+interface WoodType {
+  id: string
+  name: string
+  price_modifier?: number
+  finishes: Array<{
+    id: string
+    name: string
+    price_modifier?: number
+  }>
+}
+
+interface MetalType {
+  id: string
+  name: string
+  price_modifier?: number
+  finishes: Array<{
+    id: string
+    name: string
+    price_modifier?: number
+    colors: Array<{
+      id: string
+      name: string
+      price_modifier?: number
+    }>
+  }>
+}
+
+interface StoneType {
+  id: string
+  name: string
+  price_modifier?: number
+  finishes: Array<{
+    id: string
+    name: string
+    price_modifier?: number
+  }>
+}
+
+interface WeavingMaterial {
+  id: string
+  name: string
+  price_modifier?: number
+  patterns: Array<{
+    id: string
+    name: string
+    price_modifier?: number
+    colors: Array<{
+      id: string
+      name: string
+      price_modifier?: number
+    }>
+  }>
+}
+
+interface CarvingStyle {
+  id: string
+  name: string
+  price_modifier?: number
+}
+
+interface MaterialOptionsType {
+  fabric_brands: FabricBrand[]
+  wood_types: WoodType[]
+  metal_types: MetalType[]
+  stone_types: StoneType[]
+  weaving_materials: WeavingMaterial[]
+  carving_styles: CarvingStyle[]
+}
+
+interface PrototypeForm {
+  // === CATALOG ITEM COMPATIBLE FIELDS ===
+  name: string
+  description: string
+  category: string
+  collection_id: string
+  item_id: string
+  base_price: string
+  currency: string
+  dimensions_length: string
+  dimensions_width: string
+  dimensions_height: string
+  weight: string
+  lead_time_days: string
+  minimum_quantity: string
+  is_custom: boolean
+
+  // === PROTOTYPE-SPECIFIC FIELDS ===
+  version: string
+  status: 'draft' | 'development' | 'testing' | 'review' | 'approved' | 'rejected'
+  manufacturer_id: string
+  assigned_tester: string
+  project_manager: string
+  target_completion: string
+  testing_phase: 'not_started' | 'in_progress' | 'completed' | 'failed'
+  approval_stage: 'pending' | 'management_review' | 'client_review' | 'final_approval' | 'approved' | 'rejected'
+  prototype_cost_estimate: string
+  notes: string
+  requirements: Record<string, unknown>
+
+  // === MATERIAL SELECTIONS (identical to order form) ===
+  fabric_brand: string
+  fabric_collection: string
+  fabric_color: string
+  wood_type: string
+  wood_finish: string
+  metal_type: string
+  metal_finish: string
+  metal_color: string
+  stone_type: string
+  stone_finish: string
+  weaving_material: string
+  weaving_pattern: string
+  weaving_color: string
+  carving_style: string
+  additional_specs: string
+}
+
+export default function NewPrototypePage() {
+  const router = useRouter()
+  const { toast } = useToast()
+  const [collections, setCollections] = useState<Collection[]>([])
+  const [items, setItems] = useState<Item[]>([])
+  const [manufacturers, setManufacturers] = useState<Manufacturer[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [errors, setErrors] = useState<Record<string, string>>({})
+
+  const [materialOptions, setMaterialOptions] = useState<MaterialOptionsType>({
+    fabric_brands: [],
+    wood_types: [],
+    metal_types: [],
+    stone_types: [],
+    weaving_materials: [],
+    carving_styles: []
+  })
+
+  const [form, setForm] = useState<PrototypeForm>({
+    // === CATALOG ITEM COMPATIBLE FIELDS ===
+    name: '',
+    description: '',
+    category: 'Prototype',
+    collection_id: '',
+    item_id: '',
+    base_price: '',
+    currency: 'USD',
+    dimensions_length: '',
+    dimensions_width: '',
+    dimensions_height: '',
+    weight: '',
+    lead_time_days: '30',
+    minimum_quantity: '1',
+    is_custom: false,
+
+    // === PROTOTYPE-SPECIFIC FIELDS ===
+    version: 'v1.0',
+    status: 'draft',
+    manufacturer_id: '',
+    assigned_tester: '',
+    project_manager: '',
+    target_completion: '',
+    testing_phase: 'not_started',
+    approval_stage: 'pending',
+    prototype_cost_estimate: '',
+    notes: '',
+    requirements: {},
+
+    // === MATERIAL SELECTIONS ===
+    fabric_brand: '',
+    fabric_collection: '',
+    fabric_color: '',
+    wood_type: '',
+    wood_finish: '',
+    metal_type: '',
+    metal_finish: '',
+    metal_color: '',
+    stone_type: '',
+    stone_finish: '',
+    weaving_material: '',
+    weaving_pattern: '',
+    weaving_color: '',
+    carving_style: '',
+    additional_specs: ''
+  })
+
+  const loadCollections = useCallback(async () => {
+    try {
+      const response = await fetch('/api/collections')
+      if (!response.ok) throw new Error('Failed to fetch collections')
+      const data = await response.json()
+      if (data.success) {
+        setCollections(data.data || [])
+      }
+    } catch (error) {
+      console.error('Error loading collections:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to load collections',
+        variant: 'destructive'
+      })
+    }
+  }, [toast])
+
+  const loadItems = useCallback(async (collectionId: string) => {
+    setItems([])
+    setForm(prev => ({ ...prev, item_id: '' }))
+
+    if (!collectionId) return
+
+    try {
+      // Only load items with prototype status for prototyping
+      const response = await fetch(`/api/items?collection_id=${collectionId}&status=prototype`)
+      if (!response.ok) throw new Error('Failed to fetch items')
+
+      const data = await response.json()
+      if (data.success && data.data) {
+        setItems(data.data)
+      }
+    } catch (error) {
+      console.error('Error loading items:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to load prototype items',
+        variant: 'destructive'
+      })
+    }
+  }, [toast])
+
+  const loadManufacturers = useCallback(async () => {
+    try {
+      const response = await fetch('/api/manufacturers')
+      if (!response.ok) throw new Error('Failed to fetch manufacturers')
+      const data = await response.json()
+      setManufacturers(data || [])
+    } catch (error) {
+      console.error('Error loading manufacturers:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to load manufacturers',
+        variant: 'destructive'
+      })
+    }
+  }, [toast])
+
+  const loadMaterialOptions = useCallback(async () => {
+    try {
+      const response = await fetch('/api/materials')
+      if (!response.ok) throw new Error('Failed to fetch materials')
+      const result = await response.json()
+
+      if (result.data) {
+        setMaterialOptions({
+          fabric_brands: result.data.fabric_brands || [],
+          wood_types: result.data.wood_types || [],
+          metal_types: result.data.metal_types || [],
+          stone_types: result.data.stone_types || [],
+          weaving_materials: result.data.weaving_materials || [],
+          carving_styles: result.data.carving_styles || []
+        })
+      }
+    } catch (error) {
+      console.error('Error loading material options:', error)
+    }
+  }, [])
+
+  useEffect(() => {
+    const loadInitialData = async () => {
+      setLoading(true)
+      await Promise.all([
+        loadCollections(),
+        loadManufacturers(),
+        loadMaterialOptions()
+      ])
+      setLoading(false)
+    }
+    loadInitialData()
+  }, [loadCollections, loadManufacturers, loadMaterialOptions])
+
+  useEffect(() => {
+    if (form.collection_id) {
+      loadItems(form.collection_id)
+    }
+  }, [form.collection_id, loadItems])
+
+  const handleItemChange = (itemId: string) => {
+    const selectedItem = items.find(item => item.id === itemId)
+    if (selectedItem) {
+      setForm(prev => ({
+        ...prev,
+        item_id: itemId,
+        name: `${selectedItem.name} - Prototype`,
+        description: selectedItem.description || '',
+        base_price: selectedItem.base_price.toString(),
+        // Pre-populate with item dimensions if available
+        dimensions_length: String(selectedItem.dimensions?.length || ''),
+        dimensions_width: String(selectedItem.dimensions?.width || ''),
+        dimensions_height: String(selectedItem.dimensions?.height || ''),
+      }))
+    }
+  }
+
+  const validateForm = () => {
+    const newErrors: Record<string, string> = {}
+
+    if (!form.name.trim()) newErrors.name = 'Prototype name is required'
+    if (!form.collection_id) newErrors.collection_id = 'Please select a collection'
+    if (!form.item_id) newErrors.item_id = 'Please select a base item'
+    if (!form.manufacturer_id) newErrors.manufacturer_id = 'Please select a manufacturer'
+    if (!form.target_completion) newErrors.target_completion = 'Target completion date is required'
+
+    setErrors(newErrors)
+    return Object.keys(newErrors).length === 0
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (!validateForm()) return
+
+    setSaving(true)
+    try {
+      const response = await fetch('/api/prototypes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form)
+      })
+
+      if (response.ok) {
+        toast({
+          title: 'Success',
+          description: 'Prototype created successfully'
+        })
+        router.push('/dashboard/prototypes')
+      } else {
+        const error = await response.json()
+        setErrors({ submit: error.error || 'Failed to create prototype' })
+      }
+    } catch {
+      setErrors({ submit: 'Failed to create prototype. Please try again.' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleInputChange = (field: keyof PrototypeForm, value: string | boolean) => {
+    setForm(prev => ({ ...prev, [field]: value }))
+    if (errors[field]) {
+      setErrors(prev => ({ ...prev, [field]: '' }))
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-lg text-slate-600">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="container mx-auto px-4 py-6">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center space-x-3">
+          <Link href="/dashboard/prototypes">
+            <Button variant="ghost" size="sm">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Prototypes
+            </Button>
+          </Link>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 flex items-center">
+              <Beaker className="w-6 h-6 mr-2" />
+              New Prototype
+            </h1>
+            <p className="text-slate-600 mt-1">Create a new prototype based on catalog items</p>
+          </div>
+        </div>
+        <Button onClick={handleSubmit} disabled={saving}>
+          <Save className="w-4 h-4 mr-2" />
+          {saving ? 'Creating...' : 'Create Prototype'}
+        </Button>
+      </div>
+
+      {errors.submit && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-md">
+          <div className="flex items-center">
+            <AlertCircle className="w-5 h-5 text-red-600 mr-2" />
+            <p className="text-red-600">{errors.submit}</p>
+          </div>
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Basic Information */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Basic Information</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="collection_id">Collection *</Label>
+              <Select value={form.collection_id} onValueChange={(value) => handleInputChange('collection_id', value)}>
+                <SelectTrigger className={errors.collection_id ? 'border-red-500' : ''}>
+                  <SelectValue placeholder="Select a collection..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {collections.map((collection) => (
+                    <SelectItem key={collection.id} value={collection.id}>
+                      {collection.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {errors.collection_id && <p className="text-red-500 text-sm mt-1">{errors.collection_id}</p>}
+            </div>
+
+            <div>
+              <Label htmlFor="item_id">Base Item *</Label>
+              <Select
+                value={form.item_id}
+                onValueChange={handleItemChange}
+                disabled={!form.collection_id}
+              >
+                <SelectTrigger className={errors.item_id ? 'border-red-500' : ''}>
+                  <SelectValue placeholder={form.collection_id ? "Select a base item..." : "Select collection first"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {items.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {errors.item_id && <p className="text-red-500 text-sm mt-1">{errors.item_id}</p>}
+            </div>
+
+            <div>
+              <Label htmlFor="name">Prototype Name *</Label>
+              <Input
+                id="name"
+                value={form.name}
+                onChange={(e) => handleInputChange('name', e.target.value)}
+                className={errors.name ? 'border-red-500' : ''}
+                placeholder="Enter prototype name..."
+              />
+              {errors.name && <p className="text-red-500 text-sm mt-1">{errors.name}</p>}
+            </div>
+
+            <div>
+              <Label htmlFor="version">Version</Label>
+              <Input
+                id="version"
+                value={form.version}
+                onChange={(e) => handleInputChange('version', e.target.value)}
+                placeholder="v1.0"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <Label htmlFor="description">Description</Label>
+              <Textarea
+                id="description"
+                value={form.description}
+                onChange={(e) => handleInputChange('description', e.target.value)}
+                placeholder="Describe the prototype specifications and goals..."
+                rows={3}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Physical Specifications - Exact same as catalog items */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Physical Specifications</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <Label htmlFor="dimensions_length">Length</Label>
+              <Input
+                id="dimensions_length"
+                value={form.dimensions_length}
+                onChange={(e) => handleInputChange('dimensions_length', e.target.value)}
+                placeholder="0"
+                type="number"
+                step="0.01"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="dimensions_width">Width</Label>
+              <Input
+                id="dimensions_width"
+                value={form.dimensions_width}
+                onChange={(e) => handleInputChange('dimensions_width', e.target.value)}
+                placeholder="0"
+                type="number"
+                step="0.01"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="dimensions_height">Height</Label>
+              <Input
+                id="dimensions_height"
+                value={form.dimensions_height}
+                onChange={(e) => handleInputChange('dimensions_height', e.target.value)}
+                placeholder="0"
+                type="number"
+                step="0.01"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="weight">Weight (lbs)</Label>
+              <Input
+                id="weight"
+                value={form.weight}
+                onChange={(e) => handleInputChange('weight', e.target.value)}
+                placeholder="0"
+                type="number"
+                step="0.01"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="base_price">Base Price ($)</Label>
+              <Input
+                id="base_price"
+                value={form.base_price}
+                onChange={(e) => handleInputChange('base_price', e.target.value)}
+                placeholder="0.00"
+                type="number"
+                step="0.01"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="prototype_cost_estimate">Prototype Cost Estimate ($)</Label>
+              <Input
+                id="prototype_cost_estimate"
+                value={form.prototype_cost_estimate}
+                onChange={(e) => handleInputChange('prototype_cost_estimate', e.target.value)}
+                placeholder="0.00"
+                type="number"
+                step="0.01"
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Material Selection - Identical to order form */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Material Selection</CardTitle>
+            <p className="text-sm text-slate-600">Configure materials exactly as they would appear in orders</p>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Fabric Selection */}
+            <div className="grid grid-cols-3 gap-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <div>
+                <Label className="text-sm font-medium text-blue-900">Fabric Brand</Label>
+                <Select
+                  value={form.fabric_brand}
+                  onValueChange={(value) => {
+                    setForm(prev => ({
+                      ...prev,
+                      fabric_brand: value,
+                      fabric_collection: '',
+                      fabric_color: ''
+                    }))
+                  }}
+                >
+                  <SelectTrigger className="mt-2">
+                    <SelectValue placeholder="Select brand" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {materialOptions.fabric_brands.map((brand) => (
+                      <SelectItem key={brand.id} value={brand.name}>
+                        {brand.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label className="text-sm font-medium text-blue-900">Collection</Label>
+                <Select
+                  value={form.fabric_collection}
+                  onValueChange={(value) => {
+                    setForm(prev => ({
+                      ...prev,
+                      fabric_collection: value,
+                      fabric_color: ''
+                    }))
+                  }}
+                  disabled={!form.fabric_brand}
+                >
+                  <SelectTrigger className="mt-2">
+                    <SelectValue placeholder="Select collection" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {form.fabric_brand &&
+                      materialOptions.fabric_brands
+                        .find(brand => brand.name === form.fabric_brand)
+                        ?.collections.map((collection) => (
+                          <SelectItem key={collection.id} value={collection.name}>
+                            {collection.name}
+                          </SelectItem>
+                        ))
+                    }
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label className="text-sm font-medium text-blue-900">Color</Label>
+                <Select
+                  value={form.fabric_color}
+                  onValueChange={(value) => handleInputChange('fabric_color', value)}
+                  disabled={!form.fabric_collection}
+                >
+                  <SelectTrigger className="mt-2">
+                    <SelectValue placeholder="Select color" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {form.fabric_collection &&
+                      materialOptions.fabric_brands
+                        .find(brand => brand.name === form.fabric_brand)
+                        ?.collections.find(collection => collection.name === form.fabric_collection)
+                        ?.colors.map((color) => (
+                          <SelectItem key={color.id} value={color.name}>
+                            {color.name}
+                          </SelectItem>
+                        ))
+                    }
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Wood Selection */}
+            <div className="grid grid-cols-2 gap-4 p-4 bg-green-50 rounded-lg border border-green-200">
+              <div>
+                <Label className="text-sm font-medium text-green-900">Wood Type</Label>
+                <Select
+                  value={form.wood_type}
+                  onValueChange={(value) => {
+                    setForm(prev => ({
+                      ...prev,
+                      wood_type: value,
+                      wood_finish: ''
+                    }))
+                  }}
+                >
+                  <SelectTrigger className="mt-2">
+                    <SelectValue placeholder="Select wood type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {materialOptions.wood_types.map((wood) => (
+                      <SelectItem key={wood.id} value={wood.name}>
+                        {wood.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label className="text-sm font-medium text-green-900">Wood Finish</Label>
+                <Select
+                  value={form.wood_finish}
+                  onValueChange={(value) => handleInputChange('wood_finish', value)}
+                  disabled={!form.wood_type}
+                >
+                  <SelectTrigger className="mt-2">
+                    <SelectValue placeholder={form.wood_type ? "Select finish" : "Select wood type first"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {form.wood_type &&
+                      materialOptions.wood_types
+                        .find(wood => wood.name === form.wood_type)
+                        ?.finishes.map((finish) => (
+                          <SelectItem key={finish.id} value={finish.name}>
+                            {finish.name}
+                          </SelectItem>
+                        ))
+                    }
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Additional Specs */}
+            <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <Label className="text-sm font-medium text-slate-600">Additional Specifications</Label>
+              <Input
+                className="mt-2"
+                placeholder="Enter custom specification"
+                value={form.additional_specs}
+                onChange={(e) => handleInputChange('additional_specs', e.target.value)}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Project Management */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Project Management</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="manufacturer_id">Manufacturer *</Label>
+              <Select value={form.manufacturer_id} onValueChange={(value) => handleInputChange('manufacturer_id', value)}>
+                <SelectTrigger className={errors.manufacturer_id ? 'border-red-500' : ''}>
+                  <SelectValue placeholder="Select manufacturer..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {manufacturers.map((manufacturer) => (
+                    <SelectItem key={manufacturer.id} value={manufacturer.id}>
+                      {manufacturer.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {errors.manufacturer_id && <p className="text-red-500 text-sm mt-1">{errors.manufacturer_id}</p>}
+            </div>
+
+            <div>
+              <Label htmlFor="target_completion">Target Completion *</Label>
+              <Input
+                id="target_completion"
+                type="date"
+                value={form.target_completion}
+                onChange={(e) => handleInputChange('target_completion', e.target.value)}
+                className={errors.target_completion ? 'border-red-500' : ''}
+              />
+              {errors.target_completion && <p className="text-red-500 text-sm mt-1">{errors.target_completion}</p>}
+            </div>
+
+            <div>
+              <Label htmlFor="assigned_tester">Assigned Tester</Label>
+              <Input
+                id="assigned_tester"
+                value={form.assigned_tester}
+                onChange={(e) => handleInputChange('assigned_tester', e.target.value)}
+                placeholder="Enter tester name..."
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="project_manager">Project Manager</Label>
+              <Input
+                id="project_manager"
+                value={form.project_manager}
+                onChange={(e) => handleInputChange('project_manager', e.target.value)}
+                placeholder="Enter project manager..."
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Testing & Approval */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Testing & Approval</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <Label htmlFor="status">Status</Label>
+              <Select value={form.status} onValueChange={(value) => handleInputChange('status', value)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="development">Development</SelectItem>
+                  <SelectItem value="testing">Testing</SelectItem>
+                  <SelectItem value="review">Review</SelectItem>
+                  <SelectItem value="approved">Approved</SelectItem>
+                  <SelectItem value="rejected">Rejected</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label htmlFor="testing_phase">Testing Phase</Label>
+              <Select value={form.testing_phase} onValueChange={(value) => handleInputChange('testing_phase', value)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="not_started">Not Started</SelectItem>
+                  <SelectItem value="in_progress">In Progress</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                  <SelectItem value="failed">Failed</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label htmlFor="approval_stage">Approval Stage</Label>
+              <Select value={form.approval_stage} onValueChange={(value) => handleInputChange('approval_stage', value)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="management_review">Management Review</SelectItem>
+                  <SelectItem value="client_review">Client Review</SelectItem>
+                  <SelectItem value="final_approval">Final Approval</SelectItem>
+                  <SelectItem value="approved">Approved</SelectItem>
+                  <SelectItem value="rejected">Rejected</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="md:col-span-3">
+              <Label htmlFor="notes">Notes</Label>
+              <Textarea
+                id="notes"
+                value={form.notes}
+                onChange={(e) => handleInputChange('notes', e.target.value)}
+                placeholder="Add any notes about the prototype..."
+                rows={3}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      </form>
+    </div>
+  )
+}

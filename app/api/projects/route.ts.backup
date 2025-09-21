@@ -1,0 +1,274 @@
+import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
+
+export async function GET(request: NextRequest) {
+  try {
+    const supabase = await createServerSupabaseClient()
+
+    const url = new URL(request.url)
+    const clientId = url.searchParams.get('clientId')
+    const search = url.searchParams.get('search')
+    const limit = parseInt(url.searchParams.get('limit') || '50')
+    const offset = parseInt(url.searchParams.get('offset') || '0')
+
+    console.log('Projects API: Fetching projects', {
+      clientId,
+      search,
+      limit,
+      offset
+    })
+
+    // Build query
+    let query = supabase
+      .from('projects')
+      .select('*')
+      .range(offset, offset + limit - 1)
+
+    // Filter by client if specified
+    if (clientId) {
+      query = query.eq('client_id', clientId)
+    }
+
+    // Search filter if provided
+    if (search) {
+      query = query.or(`project_name.ilike.%${search}%,project_type.ilike.%${search}%,project_manager.ilike.%${search}%`)
+    }
+
+    const { data: projects, error: projectsError } = await query
+
+    if (projectsError) {
+      console.error('Projects query error:', projectsError)
+      return NextResponse.json(
+        { error: 'Failed to fetch projects', details: projectsError.message },
+        { status: 500 }
+      )
+    }
+
+
+    // Map database columns to frontend interface (using actual schema)
+    const mappedProjects = projects?.map(project => ({
+      // Map database columns to frontend interface
+      id: project.id,
+      name: project.name,
+      clientId: project.customer_id,
+      status: project.status,
+      startDate: project.start_date,
+      targetDate: project.end_date,
+      totalValue: project.budget,
+      projectType: project.metadata?.project_type,
+      projectManager: project.metadata?.project_manager,
+      createdAt: project.created_at,
+      updatedAt: project.updated_at,
+      // Keep original for debugging
+      _original: project
+    })) || []
+
+    console.log('Projects API: Returning', mappedProjects.length, 'mapped projects')
+    
+    return NextResponse.json({ 
+      success: true, 
+      data: mappedProjects
+    })
+
+  } catch (error) {
+    console.error('Projects API error:', error)
+    return NextResponse.json(
+      { error: 'Failed to fetch projects' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const supabase = await createServerSupabaseClient()
+
+    const body = await request.json()
+    console.log('Projects API: Creating new project:', body.name)
+    console.log('Projects API: Request body clientId:', body.clientId, 'type:', typeof body.clientId)
+
+    // Validate required fields
+    if (!body.name || !body.clientId) {
+      return NextResponse.json(
+        { error: 'Missing required fields: name, clientId' },
+        { status: 400 }
+      )
+    }
+
+    // Map frontend fields to database columns (using actual schema)
+    const projectData = {
+      name: body.name,
+      customer_id: body.clientId,
+      status: body.status || 'planning',
+      start_date: body.startDate,
+      end_date: body.targetDate,
+      budget: body.totalValue || 0,
+      description: body.description || '',
+      metadata: {
+        project_type: body.projectType,
+        project_manager: body.projectManager
+      },
+      user_id: 'system',
+      created_by: 'system',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }
+
+    // Insert the project
+    const { data: project, error: insertError } = await supabase
+      .from('projects')
+      .insert([projectData])
+      .select('*')
+      .single()
+
+    if (insertError) {
+      console.error('Project creation error:', insertError)
+      return NextResponse.json(
+        { error: 'Failed to create project', details: insertError.message },
+        { status: 500 }
+      )
+    }
+
+    // Map response back to frontend format (using actual schema)
+    const mappedProject = {
+      id: project.id,
+      name: project.name,
+      clientId: project.customer_id,
+      status: project.status,
+      startDate: project.start_date,
+      targetDate: project.end_date,
+      totalValue: project.budget,
+      projectType: project.metadata?.project_type,
+      projectManager: project.metadata?.project_manager,
+      createdAt: project.created_at,
+      updatedAt: project.updated_at
+    }
+
+    console.log('Projects API: Created project:', mappedProject.id)
+    return NextResponse.json({ success: true, data: mappedProject }, { status: 201 })
+
+  } catch (error) {
+    console.error('Projects POST error:', error)
+    return NextResponse.json(
+      { error: 'Failed to create project' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const supabase = await createServerSupabaseClient()
+
+    const body = await request.json()
+    
+    if (!body.id) {
+      return NextResponse.json(
+        { error: 'Missing project ID' },
+        { status: 400 }
+      )
+    }
+
+    console.log('Projects API: Updating project:', body.id)
+
+    // Map frontend fields to database columns (using actual schema)
+    const updateData = {
+      name: body.name,
+      customer_id: body.clientId,
+      status: body.status,
+      start_date: body.startDate,
+      end_date: body.targetDate,
+      budget: body.totalValue,
+      description: body.description,
+      metadata: {
+        project_type: body.projectType,
+        project_manager: body.projectManager
+      },
+      updated_at: new Date().toISOString()
+    }
+
+    // Update the project
+    const { data: project, error: updateError } = await supabase
+      .from('projects')
+      .update(updateData)
+      .eq('id', body.id)
+      .select('*')
+      .single()
+
+    if (updateError) {
+      console.error('Project update error:', updateError)
+      return NextResponse.json(
+        { error: 'Failed to update project', details: updateError.message },
+        { status: 500 }
+      )
+    }
+
+    // Map response back to frontend format (using actual schema)
+    const mappedProject = {
+      id: project.id,
+      name: project.name,
+      clientId: project.customer_id,
+      status: project.status,
+      startDate: project.start_date,
+      targetDate: project.end_date,
+      totalValue: project.budget,
+      projectType: project.metadata?.project_type,
+      projectManager: project.metadata?.project_manager,
+      createdAt: project.created_at,
+      updatedAt: project.updated_at
+    }
+
+    console.log('Projects API: Updated project:', mappedProject.id)
+    return NextResponse.json({ success: true, data: mappedProject })
+
+  } catch (error) {
+    console.error('Projects PUT error:', error)
+    return NextResponse.json(
+      { error: 'Failed to update project' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const supabase = await createServerSupabaseClient()
+
+    const url = new URL(request.url)
+    const projectId = url.searchParams.get('id')
+    
+    if (!projectId) {
+      return NextResponse.json(
+        { error: 'Missing project ID' },
+        { status: 400 }
+      )
+    }
+
+    console.log('Projects API: Deleting project:', projectId)
+
+    // Delete the project
+    const { error: deleteError } = await supabase
+      .from('projects')
+      .delete()
+      .eq('id', projectId)
+
+    if (deleteError) {
+      console.error('Project deletion error:', deleteError)
+      return NextResponse.json(
+        { error: 'Failed to delete project', details: deleteError.message },
+        { status: 500 }
+      )
+    }
+
+    console.log('Projects API: Deleted project:', projectId)
+    return NextResponse.json({ success: true })
+
+  } catch (error) {
+    console.error('Projects DELETE error:', error)
+    return NextResponse.json(
+      { error: 'Failed to delete project' },
+      { status: 500 }
+    )
+  }
+}

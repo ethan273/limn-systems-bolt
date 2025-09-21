@@ -1,0 +1,696 @@
+'use client'
+ 
+
+import React, { useState, useEffect, useCallback } from 'react'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { PageWrapper } from '@/components/layouts/page-wrapper'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Progress } from '@/components/ui/progress'
+import { 
+  FileText,
+  CheckCircle,
+  Clock,
+  XCircle,
+  AlertCircle,
+  Eye,
+  Download,
+  Upload,
+  MessageCircle,
+  User,
+  RotateCcw,
+  RefreshCw,
+  MoreHorizontal,
+  FileImage,
+  FileCheck,
+  AlertTriangle
+} from 'lucide-react'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { safeFormatString } from '@/lib/utils/string-helpers'
+
+// Type definitions for comprehensive shop drawings management
+interface ShopDrawing {
+  id: string
+  drawing_number: string
+  title: string
+  description: string
+  order_id: string
+  order_number: string
+  customer_id: string
+  customer_name: string
+  item_id: string
+  item_name: string
+  revision: number
+  status: 'draft' | 'submitted' | 'under_review' | 'approved' | 'rejected' | 'revision_required'
+  priority: 'low' | 'normal' | 'high' | 'urgent'
+  submitted_date: string | null
+  due_date: string
+  approved_date: string | null
+  created_date: string
+  created_by: string
+  assigned_to: string | null
+  file_path: string | null
+  file_size: number | null
+  file_type: string | null
+  notes: string | null
+  approval_notes: string | null
+  rejection_reason: string | null
+  notification_sent: boolean
+  manufacturing_ready: boolean
+}
+
+interface DrawingRevision {
+  id: string
+  drawing_id: string
+  revision_number: number
+  description: string
+  file_path: string
+  created_date: string
+  created_by: string
+  status: 'active' | 'superseded'
+}
+
+interface DrawingComment {
+  id: string
+  drawing_id: string
+  comment: string
+  created_date: string
+  created_by: string
+  user_name: string
+  comment_type: 'general' | 'approval' | 'rejection' | 'revision_request'
+}
+
+interface DrawingsSummary {
+  total_drawings: number
+  pending_approval: number
+  approved_today: number
+  overdue: number
+  average_approval_time: number
+  revision_rate: number
+  status_breakdown: Array<{
+    status: string
+    count: number
+    percentage: number
+  }>
+}
+
+export default function ShopDrawingsDashboard() {
+  // State management for comprehensive shop drawings
+  const [drawings, setDrawings] = useState<ShopDrawing[]>([])
+  const [, setRevisions] = useState<DrawingRevision[]>([])
+  const [, setComments] = useState<DrawingComment[]>([])
+  const [summary, setSummary] = useState<DrawingsSummary | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [selectedTab, setSelectedTab] = useState('overview')
+  const [selectedDrawing, setSelectedDrawing] = useState<ShopDrawing | null>(null)
+  const [filters, setFilters] = useState({
+    status: 'all',
+    priority: 'all',
+    assigned_to: 'all',
+    customer: 'all',
+    search: '',
+    date_range: '30d'
+  })
+
+  // Fetch comprehensive shop drawings data
+  const fetchDrawingsData = useCallback(async () => {
+    console.log('fetchDrawingsData called')
+    setLoading(true)
+    try {
+      // Fetch shop drawings with full details
+      const queryParams = Object.entries(filters)
+        .filter(([, value]) => value && value !== 'all')
+        .map(([key, value]) => `${key}=${encodeURIComponent(String(value))}`)
+        .join('&')
+      // Fetch shop drawings data and summary in parallel
+      console.log('Making API calls...')
+      const [drawingsResponse, summaryResponse] = await Promise.all([
+        fetch(`/api/shop-drawings/list${queryParams ? '?' + queryParams : ''}`, {
+          credentials: 'include'
+        }),
+        fetch('/api/shop-drawings/summary', {
+          credentials: 'include'
+        })
+      ])
+      console.log('API calls completed:', drawingsResponse.status, summaryResponse.status)
+      
+      const drawingsData = await drawingsResponse.json()
+      const summaryData = await summaryResponse.json()
+
+      // Fetch revisions for selected drawing
+      if (selectedDrawing) {
+        const revisionsResponse = await fetch(`/api/shop-drawings/${selectedDrawing.id}/revisions`, { credentials: 'include' })
+        const revisionsData = await revisionsResponse.json()
+        setRevisions(revisionsData.data || [])
+      }
+
+      // Fetch comments for selected drawing
+      if (selectedDrawing) {
+        const commentsResponse = await fetch(`/api/shop-drawings/${selectedDrawing.id}/comments`, { credentials: 'include' })
+        const commentsData = await commentsResponse.json()
+        setComments(commentsData.data || [])
+      }
+
+      setDrawings(drawingsData.data || [])
+      setSummary(summaryData.data || null)
+    } catch (error) {
+      console.error('Failed to fetch shop drawings data:', error)
+    } finally {
+      setLoading(false)
+    }
+  }, [filters, selectedDrawing])
+
+  // Initial load
+  useEffect(() => {
+    console.log('useEffect triggered')
+    const testFetch = async () => {
+      console.log('Starting direct API test...')
+      try {
+        const response = await fetch('/api/shop-drawings/summary', { credentials: 'include' })
+        console.log('Summary API response status:', response.status)
+        const data = await response.json()
+        console.log('Summary API response data:', data)
+        setSummary(data.data || null)
+      } catch (error) {
+        console.error('Summary API error:', error)
+      }
+    }
+    
+    testFetch()
+    fetchDrawingsData()
+  }, [fetchDrawingsData])
+
+  // Handle drawing approval/rejection
+  const handleDrawingAction = async (drawingId: string, action: 'approve' | 'reject' | 'request_revision', notes?: string) => {
+    try {
+      await fetch(`/api/shop-drawings/${drawingId}/action`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          notes,
+          user_id: 'current_user' // Would be actual user ID
+        })
+      })
+      fetchDrawingsData() // Refresh data
+    } catch (error) {
+      console.error('Failed to perform drawing action:', error)
+    }
+  }
+
+
+  // Status styling - standardized with design system
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'approved': return 'bg-success-100 text-success-800'
+      case 'under_review': return 'bg-info-100 text-info-800'
+      case 'submitted': return 'bg-warning-100 text-warning-800'
+      case 'rejected': return 'bg-error-100 text-error-800'
+      case 'revision_required': return 'bg-warning-100 text-warning-800'
+      case 'draft': return 'bg-neutral-100 text-neutral-800'
+      default: return 'bg-neutral-100 text-neutral-800'
+    }
+  }
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'approved': return <CheckCircle className="w-4 h-4" />
+      case 'under_review': return <Clock className="w-4 h-4" />
+      case 'submitted': return <Clock className="w-4 h-4" />
+      case 'rejected': return <XCircle className="w-4 h-4" />
+      case 'revision_required': return <RotateCcw className="w-4 h-4" />
+      case 'draft': return <FileText className="w-4 h-4" />
+      default: return <AlertCircle className="w-4 h-4" />
+    }
+  }
+
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'urgent': return 'bg-error-100 text-error-800'
+      case 'high': return 'bg-warning-100 text-warning-800'
+      case 'normal': return 'bg-info-100 text-info-800'
+      case 'low': return 'bg-neutral-100 text-neutral-800'
+      default: return 'bg-neutral-100 text-neutral-800'
+    }
+  }
+
+  // Format date
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    })
+  }
+
+  // Calculate days remaining
+  const getDaysRemaining = (dueDateString: string) => {
+    const dueDate = new Date(dueDateString)
+    const today = new Date()
+    const diffTime = dueDate.getTime() - today.getTime()
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+    return diffDays
+  }
+
+  if (loading) {
+    return (
+      <div className="flex-1 space-y-6 p-8 pt-6">
+        <div className="flex items-center justify-center h-96">
+          <RefreshCw className="w-8 h-8 animate-spin text-neutral-400" />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <PageWrapper 
+      title="Shop Drawings"
+      description="Manufacturing approval system with revision tracking and notifications"
+    >
+      <div className="space-y-6">
+        {/* Header Actions */}
+        <div className="flex items-center justify-between -mt-4">
+          <div></div>
+          <div className="flex items-center space-x-2">
+            <Button variant="outline">
+              <Upload className="w-4 h-4 mr-2" />
+              Upload Drawing
+            </Button>
+            <Button onClick={fetchDrawingsData}>
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Refresh
+            </Button>
+          </div>
+        </div>
+
+        {/* Summary Cards */}
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+        <Card className="bg-white border border-neutral-200 rounded-lg shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-neutral-900">Total Drawings</CardTitle>
+            <FileText className="h-4 w-4 text-info-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {summary?.total_drawings || 0}
+            </div>
+            <p className="text-xs text-neutral-500">
+              Active drawings in system
+            </p>
+          </CardContent>
+        </Card>
+        
+        <Card className="bg-white border border-neutral-200 rounded-lg shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-neutral-900">Pending Approval</CardTitle>
+            <Clock className="h-4 w-4 text-warning-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-warning-600">
+              {summary?.pending_approval || 0}
+            </div>
+            <p className="text-xs text-neutral-500">
+              Awaiting review
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-white border border-neutral-200 rounded-lg shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-neutral-900">Approved Today</CardTitle>
+            <CheckCircle className="h-4 w-4 text-success-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-success-600">
+              {summary?.approved_today || 0}
+            </div>
+            <p className="text-xs text-neutral-500">
+              Manufacturing ready
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-white border border-neutral-200 rounded-lg shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-neutral-900">Overdue</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-error-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-error-600">
+              {summary?.overdue || 0}
+            </div>
+            <p className="text-xs text-neutral-500">
+              Past due date
+            </p>
+          </CardContent>
+        </Card>
+        </div>
+
+        {/* Main Content Tabs */}
+        <Tabs value={selectedTab} onValueChange={setSelectedTab}>
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="drawings">All Drawings</TabsTrigger>
+          <TabsTrigger value="review">Review Queue</TabsTrigger>
+          <TabsTrigger value="analytics">Analytics</TabsTrigger>
+        </TabsList>
+
+        {/* Overview Tab */}
+        <TabsContent value="overview" className="space-y-6">
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* Status Breakdown */}
+            <Card className="bg-white border border-neutral-200 rounded-lg shadow-sm">
+              <CardHeader className="mb-4">
+                <CardTitle className="text-lg font-medium text-neutral-900">Status Breakdown</CardTitle>
+                <CardDescription className="text-sm text-neutral-600">Current approval workflow status</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {summary?.status_breakdown.map((status, index) => (
+                    <div key={index} className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        {getStatusIcon(status.status)}
+                        <div>
+                          <p className="font-medium capitalize">{safeFormatString(status.status, 'pending')}</p>
+                          <p className="text-sm text-slate-500">
+                            {status.count} drawings
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-medium">{status.percentage}%</p>
+                        <Progress value={status.percentage} className="w-16 h-2 mt-1" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Performance Metrics */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Performance Metrics</CardTitle>
+                <CardDescription>Approval workflow efficiency</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Average Approval Time</span>
+                    <span className="font-medium">{summary?.average_approval_time || 0} days</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Revision Rate</span>
+                    <span className="font-medium">{summary?.revision_rate || 0}%</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">On-Time Completion</span>
+                    <span className="font-medium text-green-600">87%</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">First-Pass Approval</span>
+                    <span className="font-medium text-blue-600">73%</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* All Drawings Tab */}
+        <TabsContent value="drawings" className="space-y-4">
+          {/* Filters */}
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center space-x-4">
+                <Input
+                  placeholder="Search by drawing number, title, or customer..."
+                  value={filters.search}
+                  onChange={(e) => setFilters({...filters, search: e.target.value})}
+                  className="max-w-sm"
+                />
+                <Select value={filters.status} onValueChange={(value) => setFilters({...filters, status: value})}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Filter by status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="draft">Draft</SelectItem>
+                    <SelectItem value="submitted">Submitted</SelectItem>
+                    <SelectItem value="under_review">Under Review</SelectItem>
+                    <SelectItem value="approved">Approved</SelectItem>
+                    <SelectItem value="rejected">Rejected</SelectItem>
+                    <SelectItem value="revision_required">Revision Required</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={filters.priority} onValueChange={(value) => setFilters({...filters, priority: value})}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Filter by priority" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Priorities</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="normal">Normal</SelectItem>
+                    <SelectItem value="low">Low</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Drawings Table */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Shop Drawings</CardTitle>
+              <CardDescription>Complete drawings list with approval workflow</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Drawing Number</TableHead>
+                    <TableHead>Title</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead>Order</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Priority</TableHead>
+                    <TableHead>Due Date</TableHead>
+                    <TableHead>Revision</TableHead>
+                    <TableHead>Assigned To</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {drawings.slice(0, 50).map((drawing) => {
+                    const daysRemaining = getDaysRemaining(drawing.due_date)
+                    const isOverdue = daysRemaining < 0
+                    
+                    return (
+                      <TableRow key={drawing.id}>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center space-x-2">
+                            <FileImage className="w-4 h-4 text-slate-500" />
+                            <span>{drawing.drawing_number}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{drawing.title}</p>
+                            <p className="text-sm text-slate-500">{drawing.item_name}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>{drawing.customer_name}</TableCell>
+                        <TableCell>{drawing.order_number}</TableCell>
+                        <TableCell>
+                          <Badge className={getStatusColor(drawing.status)}>
+                            <span className="flex items-center space-x-1">
+                              {getStatusIcon(drawing.status)}
+                              <span>{safeFormatString(drawing.status, 'pending')}</span>
+                            </span>
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className={getPriorityColor(drawing.priority)}>
+                            {drawing.priority}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className={isOverdue ? 'text-red-600 font-medium' : ''}>
+                            {formatDate(drawing.due_date)}
+                            <p className="text-xs text-neutral-500">
+                              {isOverdue ? `${Math.abs(daysRemaining)} days overdue` : `${daysRemaining} days left`}
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <span className="font-mono">Rev {drawing.revision}</span>
+                        </TableCell>
+                        <TableCell>
+                          {drawing.assigned_to ? (
+                            <div className="flex items-center space-x-2">
+                              <User className="w-4 h-4 text-slate-500" />
+                              <span>{drawing.assigned_to}</span>
+                            </div>
+                          ) : (
+                            <span className="text-slate-500">Unassigned</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" className="h-8 w-8 p-0">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => setSelectedDrawing(drawing)}>
+                                <Eye className="h-4 w-4 mr-2" />
+                                View Details
+                              </DropdownMenuItem>
+                              <DropdownMenuItem>
+                                <Download className="h-4 w-4 mr-2" />
+                                Download
+                              </DropdownMenuItem>
+                              {drawing.status === 'submitted' || drawing.status === 'under_review' ? (
+                                <>
+                                  <DropdownMenuItem 
+                                    onClick={() => handleDrawingAction(drawing.id, 'approve')}
+                                    className="text-green-600"
+                                  >
+                                    <CheckCircle className="h-4 w-4 mr-2" />
+                                    Approve
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem 
+                                    onClick={() => handleDrawingAction(drawing.id, 'reject', 'Rejection reason')}
+                                    className="text-red-600"
+                                  >
+                                    <XCircle className="h-4 w-4 mr-2" />
+                                    Reject
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem 
+                                    onClick={() => handleDrawingAction(drawing.id, 'request_revision')}
+                                    className="text-orange-600"
+                                  >
+                                    <RotateCcw className="h-4 w-4 mr-2" />
+                                    Request Revision
+                                  </DropdownMenuItem>
+                                </>
+                              ) : null}
+                              <DropdownMenuItem>
+                                <MessageCircle className="h-4 w-4 mr-2" />
+                                Add Comment
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Review Queue Tab */}
+        <TabsContent value="review" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Review Queue</CardTitle>
+              <CardDescription>Drawings pending approval or requiring action</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {drawings
+                  .filter(d => ['submitted', 'under_review', 'revision_required'].includes(d.status))
+                  .slice(0, 10)
+                  .map((drawing) => (
+                    <div key={drawing.id} className="flex items-center justify-between p-4 border rounded-lg">
+                      <div className="flex items-center space-x-4">
+                        <div className="p-2 bg-gray-100 rounded-full">
+                          <FileCheck className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <p className="font-medium">{drawing.drawing_number} - {drawing.title}</p>
+                          <p className="text-sm text-slate-500">
+                            {drawing.customer_name} • Order {drawing.order_number}
+                          </p>
+                          <div className="flex items-center space-x-2 mt-1">
+                            <Badge className={getStatusColor(drawing.status)}>
+                              {safeFormatString(drawing.status, 'pending')}
+                            </Badge>
+                            <Badge className={getPriorityColor(drawing.priority)}>
+                              {drawing.priority}
+                            </Badge>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm text-slate-500">Due {formatDate(drawing.due_date)}</p>
+                        <div className="flex items-center space-x-2 mt-2">
+                          <Button size="sm" onClick={() => handleDrawingAction(drawing.id, 'approve')}>
+                            <CheckCircle className="w-4 h-4 mr-1" />
+                            Approve
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => handleDrawingAction(drawing.id, 'request_revision')}>
+                            <RotateCcw className="w-4 h-4 mr-1" />
+                            Revision
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Analytics Tab */}
+        <TabsContent value="analytics" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Shop Drawings Analytics</CardTitle>
+              <CardDescription>Performance metrics and workflow analysis</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <h4 className="font-medium mb-2">Workflow Performance</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-sm">Average Approval Time:</span>
+                      <span className="font-medium">{summary?.average_approval_time || 0} days</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm">Revision Rate:</span>
+                      <span className="font-medium">{summary?.revision_rate || 0}%</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm">First-Pass Approval:</span>
+                      <span className="font-medium">73%</span>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <h4 className="font-medium mb-2">Bottleneck Analysis</h4>
+                  <div className="space-y-2 text-sm">
+                    <p>Review Stage: 2.3 days average</p>
+                    <p>Revision Cycle: 1.8 days average</p>
+                    <p>Customer Response: 0.5 days average</p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+        </Tabs>
+      </div>
+    </PageWrapper>
+  )
+}

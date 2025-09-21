@@ -1,0 +1,504 @@
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { toast } from '@/components/ui/use-toast'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { PageHeader } from '@/components/ui/page-header'
+import { LoadingSpinner } from '@/components/ui/loading-spinner'
+import { Alert } from '@/components/ui/alert'
+import { EfficiencyCard } from '@/components/efficiency-card'
+import { CustomerSegmentCard } from '@/components/customer-segment-card'
+import { CLVCalculator } from '@/components/clv-calculator'
+import { SimpleChart } from '@/components/charts/simple-chart'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { 
+  Users,
+  DollarSign,
+  TrendingUp,
+  Target,
+  ShoppingCart,
+  Star,
+  AlertTriangle,
+  Download,
+  RefreshCw,
+  Crown,
+  Award,
+  UserCheck,
+  UserPlus
+} from 'lucide-react'
+
+interface CustomerAnalytics {
+  summary: {
+    total_customers: number
+    average_clv: number
+    average_order_value: number
+    repeat_rate: number
+    cac: number
+    clv_cac_ratio: number
+  }
+  segments: Array<{
+    id: string
+    name: string
+    size: number
+    percentage: number
+    avg_clv: number
+    avg_orders: number
+    characteristics: string[]
+    color: string
+    metrics: {
+      growth_rate: number
+      retention_rate: number
+    }
+  }>
+  top_customers: Array<{
+    id: string
+    name: string
+    total_revenue: number
+    order_count: number
+    avg_order_value: number
+    last_order_date: string
+    segment: string
+    status: string
+  }>
+  clv_distribution: Array<{
+    range: string
+    count: number
+    percentage: number
+  }>
+  insights: {
+    avg_time_to_first_purchase: number
+    avg_time_between_purchases: number
+    most_common_entry_product: string
+    upsell_rate: number
+    seasonal_patterns: Array<{
+      month: string
+      revenue: number
+      customers: number
+    }>
+  }
+  recommendations: string[]
+}
+
+export default function CustomerAnalyticsPage() {
+  const [analytics, setAnalytics] = useState<CustomerAnalytics | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [period, setPeriod] = useState('12m')
+  const [refreshing, setRefreshing] = useState(false)
+
+  const loadAnalytics = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      const response = await fetch(`/api/customers/analytics?period=${period}`)
+      if (!response.ok) {
+        throw new Error('Failed to load customer analytics')
+      }
+
+      const data = await response.json()
+      setAnalytics(data)
+    } catch (err) {
+      console.error('Error loading customer analytics:', err)
+      setError(err instanceof Error ? err.message : 'Failed to load customer analytics')
+    } finally {
+      setLoading(false)
+    }
+  }, [period])
+
+  useEffect(() => {
+    loadAnalytics()
+  }, [loadAnalytics])
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    await loadAnalytics()
+    setRefreshing(false)
+  }
+
+  const getStatusIcon = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'vip': return Crown
+      case 'active': return Award
+      case 'standard': return UserCheck
+      default: return UserPlus
+    }
+  }
+
+  const getStatusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'vip': return 'bg-yellow-100 text-yellow-800 border-yellow-200'
+      case 'active': return 'bg-blue-100 text-blue-800 border-blue-200'
+      case 'standard': return 'bg-green-100 text-green-800 border-green-200'
+      default: return 'bg-gray-100 text-gray-800 border-gray-200'
+    }
+  }
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount)
+  }
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric'
+    })
+  }
+
+  if (loading && !analytics) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Customer Analytics" />
+        <div className="flex items-center justify-center py-12">
+          <LoadingSpinner size="lg" />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Customer Analytics"
+        description="Comprehensive customer intelligence, lifetime value analysis, and segmentation insights"
+        actions={
+          <div className="flex items-center space-x-2">
+            <Select value={period} onValueChange={setPeriod}>
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="3m">Last 3 months</SelectItem>
+                <SelectItem value="6m">Last 6 months</SelectItem>
+                <SelectItem value="12m">Last 12 months</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
+              <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+            <Button variant="outline" size="sm">
+              <Download className="w-4 h-4 mr-2" />
+              Export
+            </Button>
+          </div>
+        }
+      />
+
+      {error && (
+        <Alert variant="error">
+          <AlertTriangle className="h-4 w-4" />
+          <span>{error}</span>
+        </Alert>
+      )}
+
+      {analytics && (
+        <>
+          {/* Key Metrics Row */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
+            <EfficiencyCard
+              title="Total Customers"
+              value={analytics.summary.total_customers}
+              format="number"
+              icon={Users}
+              subtitle="Active customer base"
+              trend={8.5}
+              trendPeriod="vs last period"
+            />
+            <EfficiencyCard
+              title="Average CLV"
+              value={analytics.summary.average_clv}
+              format="currency"
+              icon={DollarSign}
+              subtitle="Customer lifetime value"
+              trend={12.3}
+              trendPeriod="vs last period"
+            />
+            <EfficiencyCard
+              title="Average Order Value"
+              value={analytics.summary.average_order_value}
+              format="currency"
+              icon={ShoppingCart}
+              subtitle="Revenue per transaction"
+              trend={5.7}
+              trendPeriod="vs last period"
+            />
+            <EfficiencyCard
+              title="Repeat Purchase Rate"
+              value={analytics.summary.repeat_rate}
+              format="percentage"
+              icon={Target}
+              subtitle="Customers with 2+ orders"
+              trend={2.1}
+              trendPeriod="vs last period"
+            />
+            <EfficiencyCard
+              title="Customer Acquisition Cost"
+              value={analytics.summary.cac}
+              format="currency"
+              icon={TrendingUp}
+              subtitle="Cost to acquire customer"
+              trend={-8.2}
+              trendPeriod="vs last period"
+            />
+            <EfficiencyCard
+              title="CLV:CAC Ratio"
+              value={analytics.summary.clv_cac_ratio}
+              format="decimal"
+              icon={Star}
+              subtitle="Return on acquisition"
+              target={3}
+              trend={15.4}
+              trendPeriod="vs last period"
+            />
+          </div>
+
+          {/* Customer Segmentation */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900">Customer Segmentation</h3>
+              <Button variant="outline" size="sm">
+                <Users className="w-4 h-4 mr-2" />
+                Manage Segments
+              </Button>
+            </div>
+            
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6">
+              {(analytics.segments || []).map((segment, index) => (
+                <CustomerSegmentCard
+                  key={segment.id || segment.name || index}
+                  segment={{
+                    id: segment.id || segment.name,
+                    name: segment.name,
+                    description: `${segment.size} customers (${segment.percentage}% of total)`,
+                    customer_count: segment.size,
+                    percentage: segment.percentage,
+                    metrics: {
+                      avg_clv: segment.avg_clv,
+                      growth_rate: segment.metrics?.growth_rate || 0,
+                      retention_rate: segment.metrics?.retention_rate || 0
+                    },
+                    characteristics: segment.characteristics,
+                    color: segment.color
+                  }}
+                  onClick={() => toast.info(`${segment.name} segment details feature coming soon`)}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* CLV Distribution and Top Customers */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* CLV Distribution Chart */}
+            <SimpleChart
+              data={(analytics.clv_distribution || []).map(d => ({
+                label: d.range,
+                value: d.count,
+                target: undefined
+              }))}
+              type="bar"
+              title="Customer Lifetime Value Distribution"
+              height={300}
+              valueFormatter={(v) => `${v} customers`}
+            />
+
+            {/* Seasonal Revenue Pattern */}
+            <SimpleChart
+              data={(analytics.insights?.seasonal_patterns || []).map(p => ({
+                label: p.month,
+                value: p.revenue / 1000,
+                target: undefined
+              }))}
+              type="line"
+              title="Seasonal Revenue Patterns ($K)"
+              height={300}
+              valueFormatter={(v) => `$${v.toFixed(0)}K`}
+            />
+          </div>
+
+          {/* Top Customers Table */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Top Customers</CardTitle>
+              <p className="text-sm text-gray-600">
+                Highest value customers by total revenue
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Customer</TableHead>
+                      <TableHead className="text-right">Total Revenue</TableHead>
+                      <TableHead className="text-right">Orders</TableHead>
+                      <TableHead className="text-right">Avg Order</TableHead>
+                      <TableHead>Last Order</TableHead>
+                      <TableHead>Segment</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-center">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(analytics.top_customers || []).map((customer) => {
+                      const StatusIcon = getStatusIcon(customer.status)
+                      
+                      return (
+                        <TableRow key={customer.id}>
+                          <TableCell>
+                            <div className="font-medium text-gray-900">
+                              {customer.name}
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              ID: {customer.id}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right font-semibold">
+                            {formatCurrency(customer.total_revenue)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {customer.order_count}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {formatCurrency(customer.avg_order_value)}
+                          </TableCell>
+                          <TableCell>
+                            {formatDate(customer.last_order_date)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-xs">
+                              {customer.segment}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center space-x-1">
+                              <StatusIcon className="w-4 h-4" />
+                              <Badge 
+                                variant="outline" 
+                                className={`text-xs ${getStatusColor(customer.status)}`}
+                              >
+                                {customer.status}
+                              </Badge>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Button variant="outline" size="sm">
+                              View
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Insights and Recommendations */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Customer Journey Insights */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Customer Journey Insights</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="text-center p-3 bg-blue-50 rounded-lg">
+                    <div className="text-2xl font-bold text-blue-600">
+                      {analytics.insights.avg_time_to_first_purchase}
+                    </div>
+                    <div className="text-sm text-gray-600">Days to First Purchase</div>
+                  </div>
+                  <div className="text-center p-3 bg-purple-50 rounded-lg">
+                    <div className="text-2xl font-bold text-purple-600">
+                      {analytics.insights.avg_time_between_purchases}
+                    </div>
+                    <div className="text-sm text-gray-600">Months Between Orders</div>
+                  </div>
+                </div>
+                
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+                    <div>
+                      <div className="font-medium text-green-800">Most Popular Entry Product</div>
+                      <div className="text-sm text-green-700">{analytics.insights.most_common_entry_product}</div>
+                    </div>
+                    <Target className="w-5 h-5 text-green-600" />
+                  </div>
+                  
+                  <div className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
+                    <div>
+                      <div className="font-medium text-orange-800">Upsell Success Rate</div>
+                      <div className="text-sm text-orange-700">{analytics.insights.upsell_rate}% of customers purchase additional items</div>
+                    </div>
+                    <TrendingUp className="w-5 h-5 text-orange-600" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Actionable Recommendations */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Actionable Recommendations</CardTitle>
+                <p className="text-sm text-gray-600">
+                  Data-driven suggestions to improve customer value
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {(analytics.recommendations || []).map((recommendation, index) => {
+                    const isUrgent = recommendation.toLowerCase().includes('vip') || 
+                                   recommendation.toLowerCase().includes('immediate')
+                    const isOpportunity = recommendation.toLowerCase().includes('opportunity') || 
+                                        recommendation.toLowerCase().includes('increase')
+                    
+                    return (
+                      <div 
+                        key={index} 
+                        className={`p-3 rounded-lg border ${
+                          isUrgent ? 'border-red-200 bg-red-50' :
+                          isOpportunity ? 'border-blue-200 bg-blue-50' :
+                          'border-green-200 bg-green-50'
+                        }`}
+                      >
+                        <div className="flex items-start space-x-3">
+                          {isUrgent ? (
+                            <AlertTriangle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
+                          ) : isOpportunity ? (
+                            <TrendingUp className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                          ) : (
+                            <Star className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                          )}
+                          <p className={`text-sm ${
+                            isUrgent ? 'text-red-800' :
+                            isOpportunity ? 'text-blue-800' :
+                            'text-green-800'
+                          }`}>
+                            {recommendation}
+                          </p>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* CLV Calculator */}
+          <CLVCalculator />
+        </>
+      )}
+    </div>
+  )
+}

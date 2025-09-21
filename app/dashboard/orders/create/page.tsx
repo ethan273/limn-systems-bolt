@@ -1,0 +1,1503 @@
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { toast } from '@/components/ui/use-toast'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { 
+  ArrowLeft,
+  Save,
+  Package,
+  ShoppingCart,
+  X,
+  ArrowDown,
+  Edit2,
+  Check,
+  Minus,
+  Plus
+} from 'lucide-react'
+import Link from 'next/link'
+import { safeFormatString } from '@/lib/utils/string-helpers'
+
+interface Collection {
+  id: string
+  name: string
+  description?: string
+}
+
+interface Item {
+  id: string
+  collection_id: string
+  name: string
+  base_price: number
+  description?: string
+  sku_base?: string  // Base product SKU
+  sku?: string       // Full SKU with materials
+  client_sku?: string // Client-specific tracking
+}
+
+interface ProjectData {
+  id: string
+  name?: string
+  project_name?: string
+  client_name?: string
+  customer_name?: string
+}
+
+interface CollectionData {
+  id: string
+  name: string
+  description?: string
+  is_active?: boolean
+  display_order?: number
+  prefix?: string
+}
+
+interface ItemData {
+  id: string
+  collection_id: string
+  name?: string
+  item_name?: string
+  base_price?: number
+  description?: string
+  item_description?: string
+  is_active?: boolean
+}
+
+interface OrderItem {
+  id: string
+  collection_id: string
+  collection_name: string
+  item_id: string
+  item_name: string
+  price: number
+  quantity: number
+  subtotal: number
+  sku: string
+  client_sku: string
+  materials: {
+    fabric?: string
+    wood?: string
+    metal?: string
+    stone?: string
+    weave?: string
+    carving?: string
+    additional_specs?: string
+  }
+}
+
+export default function CreateOrderPage() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const projectId = searchParams?.get('project_id')
+  
+  const [loading, setLoading] = useState(false)
+  
+  // Form Step Management
+  const [, setCurrentStep] = useState<'select' | 'materials'>('select')
+  const [showMaterials, setShowMaterials] = useState(false)
+  
+  // Collections and Items
+  const [collections, setCollections] = useState<Collection[]>([])
+  const [items, setItems] = useState<Item[]>([])
+  const [selectedCollection, setSelectedCollection] = useState('')
+  const [selectedItem, setSelectedItem] = useState('')
+  
+  // Item Form Data
+  const [price, setPrice] = useState('')
+  const [quantity, setQuantity] = useState('1')
+  
+  // Material Selections with cascading options
+  const [materialSelections, setMaterialSelections] = useState({
+    fabric_brand: '',
+    fabric_collection: '',
+    fabric_color: '',
+    wood_type: '',
+    wood_finish: '',
+    metal_type: '',
+    metal_finish: '',
+    metal_color: '',
+    stone_type: '',
+    stone_finish: '',
+    weaving_material: '',
+    weaving_pattern: '',
+    weaving_color: '',
+    carving_style: '',
+    additional_specs: ''
+  })
+  
+  // Order Items List
+  const [orderItems, setOrderItems] = useState<OrderItem[]>([])
+  
+  // Edit State for Order Items
+  const [editingItem, setEditingItem] = useState<string | null>(null)
+  const [editQuantity, setEditQuantity] = useState('')
+  
+  // Client Information
+  const [clientName, setClientName] = useState('')
+  const [projectName, setProjectName] = useState('')
+  const [estimatedDelivery, setEstimatedDelivery] = useState('')
+
+  const loadProjectDetails = useCallback(async () => {
+    if (projectId) {
+      try {
+        const response = await fetch(`/api/projects`, {
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        })
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch project details')
+        }
+
+        const data = await response.json()
+        const projects = data.data || []
+        
+        const project = projects.find((p: ProjectData) => p.id === projectId)
+        if (project) {
+          setProjectName(project.name || project.project_name || 'Unknown Project')
+          setClientName(project.client_name || project.customer_name || 'Unknown Client')
+        }
+      } catch (error) {
+        console.error('Error loading project details:', error)
+      }
+    }
+  }, [projectId])
+
+  useEffect(() => {
+    if (selectedCollection) {
+      loadItems(selectedCollection)
+    }
+  }, [selectedCollection])
+
+  const loadCollections = useCallback(async () => {
+    try {
+      const response = await fetch('/api/collections', {
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      })
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Authentication required. Please log in to access collections.')
+        }
+        throw new Error(`Failed to fetch collections: ${response.status} ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      const collections = data.data || []
+      
+      // Filter to only active collections and sort by display order
+      const activeCollections = collections
+        .filter((collection: CollectionData) => collection.is_active !== false)
+        .sort((a: CollectionData, b: CollectionData) => (a.display_order || 999) - (b.display_order || 999))
+        .map((collection: CollectionData) => ({
+          id: collection.id,
+          name: collection.name,
+          description: collection.description || '',
+          prefix: collection.prefix || ''
+        }))
+
+      setCollections(activeCollections)
+    } catch (error) {
+      console.error('Error loading collections:', error)
+      // Fallback to empty array if API fails
+      setCollections([])
+    }
+  }, [])
+
+  const loadMaterialOptions = useCallback(async () => {
+    try {
+      console.log('Frontend: Starting loadMaterialOptions...')
+      
+      // Load material dropdown options from API
+      const response = await fetch('/api/materials', {
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      })
+
+      console.log('Frontend: Materials API response status:', response.status)
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch materials: ${response.status} ${response.statusText}`)
+      }
+
+      const result = await response.json()
+      console.log('Frontend: Materials API full response:', result)
+      
+      const dropdownData = result.data
+      console.log('Frontend: Materials dropdown data:', dropdownData)
+
+      if (dropdownData) {
+        const materialOptionsToSet = {
+          fabric_brands: dropdownData.fabric_brands || [],
+          wood_types: dropdownData.wood_types || [],
+          metal_types: dropdownData.metal_types || [],
+          stone_types: dropdownData.stone_types || [],
+          weaving_materials: dropdownData.weaving_materials || [],
+          carving_styles: dropdownData.carving_styles || []
+        }
+        
+        console.log('Frontend: Setting material options:', materialOptionsToSet)
+        setMaterialOptions(materialOptionsToSet)
+        
+        console.log('Frontend: Material options set successfully')
+      } else {
+        console.log('Frontend: No dropdown data received from API')
+      }
+    } catch (error) {
+      console.error('Frontend: Error loading material options:', error)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadCollections()
+    loadProjectDetails()
+    loadMaterialOptions()
+    // Set default delivery date to 60 days from now
+    const deliveryDate = new Date()
+    deliveryDate.setDate(deliveryDate.getDate() + 60)
+    setEstimatedDelivery(deliveryDate.toISOString().split('T')[0])
+  }, [loadCollections, loadProjectDetails, loadMaterialOptions, projectId])
+
+  const loadItems = async (collectionId: string) => {
+    try {
+      const response = await fetch(`/api/items?collection_id=${collectionId}&status=production`, {
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      })
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Authentication required. Please log in to access items.')
+        }
+        throw new Error(`Failed to fetch items: ${response.status} ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      const items = data.data || []
+      
+      // Filter to only active items and format for the UI
+      const activeItems = items
+        .filter((item: ItemData) => item.is_active !== false)
+        .map((item: ItemData) => ({
+          id: item.id,
+          collection_id: item.collection_id,
+          name: item.name || item.item_name || 'Unnamed Item',
+          base_price: item.base_price || 0,
+          description: item.description || item.item_description || ''
+        }))
+
+      setItems(activeItems)
+    } catch (error) {
+      console.error('Error loading items:', error)
+      // Fallback to empty array if API fails
+      setItems([])
+    }
+  }
+
+
+  const calculateSubtotal = async () => {
+    const priceNum = parseFloat(price) || 0
+    const quantityNum = parseInt(quantity) || 1
+    
+    // Calculate material price modifiers from hierarchical data
+    let materialPriceAdjustment = 0
+    try {
+      // Find fabric brand and calculate price modifiers
+      if (materialSelections.fabric_brand) {
+        const brand = materialOptions.fabric_brands.find(b => b.name === materialSelections.fabric_brand)
+        if (brand) {
+          materialPriceAdjustment += brand.price_modifier || 0
+          
+          // Add collection price modifier
+          if (materialSelections.fabric_collection) {
+            const collection = brand.collections.find(c => c.name === materialSelections.fabric_collection)
+            if (collection) {
+              materialPriceAdjustment += collection.price_modifier || 0
+              
+              // Add color price modifier
+              if (materialSelections.fabric_color) {
+                const color = collection.colors.find(c => c.name === materialSelections.fabric_color)
+                if (color) {
+                  materialPriceAdjustment += color.price_modifier || 0
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      // Calculate wood price modifiers
+      if (materialSelections.wood_type) {
+        const woodType = materialOptions.wood_types.find(w => w.name === materialSelections.wood_type)
+        if (woodType) {
+          materialPriceAdjustment += woodType.price_modifier || 0
+          
+          if (materialSelections.wood_finish) {
+            const finish = woodType.finishes.find(f => f.name === materialSelections.wood_finish)
+            if (finish) {
+              materialPriceAdjustment += finish.price_modifier || 0
+            }
+          }
+        }
+      }
+      
+      // Calculate metal price modifiers
+      if (materialSelections.metal_type) {
+        const metalType = materialOptions.metal_types.find(m => m.name === materialSelections.metal_type)
+        if (metalType) {
+          materialPriceAdjustment += metalType.price_modifier || 0
+          
+          if (materialSelections.metal_finish) {
+            const finish = metalType.finishes.find(f => f.name === materialSelections.metal_finish)
+            if (finish) {
+              materialPriceAdjustment += finish.price_modifier || 0
+              
+              if (materialSelections.metal_color) {
+                const color = finish.colors.find(c => c.name === materialSelections.metal_color)
+                if (color) {
+                  materialPriceAdjustment += color.price_modifier || 0
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      // Calculate carving style price modifier
+      if (materialSelections.carving_style) {
+        const carving = materialOptions.carving_styles.find(c => c.name === materialSelections.carving_style)
+        if (carving) {
+          materialPriceAdjustment += carving.price_modifier || 0
+        }
+      }
+    } catch (error) {
+      console.error('Error calculating material price:', error)
+    }
+    
+    const basePrice = (priceNum + materialPriceAdjustment) * quantityNum
+    return basePrice
+  }
+  
+  // Synchronous version for display (without material pricing)
+  const calculateDisplayPrice = () => {
+    const priceNum = parseFloat(price) || 0
+    const quantityNum = parseInt(quantity) || 1
+    return priceNum * quantityNum
+  }
+
+  const addItemToOrder = async () => {
+    if (!selectedCollection || !selectedItem || !price || !clientName) {
+      toast.error('Please fill in all required fields including client name')
+      return
+    }
+
+    const collection = collections.find(c => c.id === selectedCollection)
+    const item = items.find(i => i.id === selectedItem)
+    
+    if (!collection || !item) return
+
+    // Helper function to safely create SKU codes from strings
+    const createSKUCode = (text: string, fallback = 'UNK'): string => {
+      if (!text || typeof text !== 'string') return fallback
+      return text.trim().substring(0, 3).toUpperCase() || fallback
+    }
+
+    // Use the item's existing base SKU from the database
+    console.log('Debug SKU - item.sku_base:', item.sku_base, 'collection:', collection.name, 'item:', item.name)
+    const baseSKU = item.sku_base || `${createSKUCode(collection.name, 'COL')}-${createSKUCode(item.name, 'ITM')}`
+    console.log('Debug SKU - baseSKU:', baseSKU)
+    
+    // Generate Material SKU codes based on selections
+    const materialCodes: string[] = []
+    
+    // Fabric: Brand-Collection-Color (e.g., SUN-MAR-NAV)
+    if (materialSelections.fabric_brand && materialSelections.fabric_collection && materialSelections.fabric_color) {
+      const brandCode = createSKUCode(materialSelections.fabric_brand)
+      const collectionCode = createSKUCode(materialSelections.fabric_collection)
+      const colorCode = createSKUCode(materialSelections.fabric_color)
+      materialCodes.push(`${brandCode}-${collectionCode}-${colorCode}`)
+    }
+    
+    // Wood: Type-Finish (e.g., TEA-NAT)
+    if (materialSelections.wood_type && materialSelections.wood_finish) {
+      const typeCode = createSKUCode(materialSelections.wood_type)
+      const finishCode = createSKUCode(materialSelections.wood_finish)
+      materialCodes.push(`${typeCode}-${finishCode}`)
+    }
+    
+    // Metal: Type-Finish-Color (e.g., ALU-POW-BLA)
+    if (materialSelections.metal_type && materialSelections.metal_finish && materialSelections.metal_color) {
+      const typeCode = createSKUCode(materialSelections.metal_type)
+      const finishCode = createSKUCode(materialSelections.metal_finish)
+      const colorCode = createSKUCode(materialSelections.metal_color)
+      materialCodes.push(`${typeCode}-${finishCode}-${colorCode}`)
+    }
+    
+    // Stone: Type-Finish (e.g., CAR-POL)
+    if (materialSelections.stone_type && materialSelections.stone_finish) {
+      const typeCode = createSKUCode(materialSelections.stone_type)
+      const finishCode = createSKUCode(materialSelections.stone_finish)
+      materialCodes.push(`${typeCode}-${finishCode}`)
+    }
+    
+    // Weave: Material-Pattern-Color (e.g., MAR-TWI-WHI)
+    if (materialSelections.weaving_material && materialSelections.weaving_pattern && materialSelections.weaving_color) {
+      const materialCode = createSKUCode(materialSelections.weaving_material)
+      const patternCode = createSKUCode(materialSelections.weaving_pattern)
+      const colorCode = createSKUCode(materialSelections.weaving_color)
+      materialCodes.push(`${materialCode}-${patternCode}-${colorCode}`)
+    }
+    
+    // Carving: Style code
+    if (materialSelections.carving_style && materialSelections.carving_style !== 'None') {
+      const styleCode = createSKUCode(materialSelections.carving_style)
+      materialCodes.push(`CARV-${styleCode}`)
+    }
+    
+    // Full Material SKU (Base + All Material Selections)
+    const materialSKU = materialCodes.length > 0 ? materialCodes.join('-') : ''
+    const fullMaterialSKU = materialSKU ? `${baseSKU}-${materialSKU}` : baseSKU
+
+    console.log('Debug SKU Generation:')
+    console.log('  baseSKU:', baseSKU)
+    console.log('  materialCodes:', materialCodes)
+    console.log('  materialSKU:', materialSKU)
+    console.log('  fullMaterialSKU:', fullMaterialSKU)
+    
+    // Client/Order Specific SKU (for tracking) - Unique identifier for this specific client order item
+    const clientCode = createSKUCode(clientName, 'CLI')
+    const currentDate = new Date()
+    const year = currentDate.getFullYear().toString().slice(-2)
+    const month = String(currentDate.getMonth() + 1).padStart(2, '0')
+    const day = String(currentDate.getDate()).padStart(2, '0')
+    const timestamp = Date.now().toString().slice(-6)
+    const orderSpecificSKU = `${clientCode}-${year}${month}${day}-${timestamp}`
+
+    const newItem: OrderItem = {
+      id: Date.now().toString(),
+      collection_id: selectedCollection,
+      collection_name: collection.name,
+      item_id: selectedItem,
+      item_name: item.name,
+      price: parseFloat(price),
+      quantity: parseInt(quantity),
+      subtotal: await calculateSubtotal(),
+      sku: fullMaterialSKU,
+      client_sku: orderSpecificSKU,
+      materials: {
+        fabric: materialSelections.fabric_brand ? `${materialSelections.fabric_brand} ${materialSelections.fabric_collection || ''} ${materialSelections.fabric_color || ''}`.trim() : '',
+        wood: materialSelections.wood_type ? `${materialSelections.wood_type} ${materialSelections.wood_finish || ''}`.trim() : '',
+        metal: materialSelections.metal_type ? `${materialSelections.metal_type} ${materialSelections.metal_finish || ''} ${materialSelections.metal_color || ''}`.trim() : '',
+        stone: materialSelections.stone_type ? `${materialSelections.stone_type} ${materialSelections.stone_finish || ''}`.trim() : '',
+        weave: materialSelections.weaving_material ? `${materialSelections.weaving_material} ${materialSelections.weaving_pattern || ''} ${materialSelections.weaving_color || ''}`.trim() : '',
+        carving: materialSelections.carving_style || '',
+        additional_specs: materialSelections.additional_specs || ''
+      }
+    }
+
+    setOrderItems(prev => [...prev, newItem])
+
+    // Reset form for next item
+    setSelectedCollection('')
+    setSelectedItem('')
+    setPrice('')
+    setQuantity('1')
+    setShowMaterials(false)
+    setCurrentStep('select')
+    setMaterialSelections({
+      fabric_brand: '',
+      fabric_collection: '',
+      fabric_color: '',
+      wood_type: '',
+      wood_finish: '',
+      metal_type: '',
+      metal_finish: '',
+      metal_color: '',
+      stone_type: '',
+      stone_finish: '',
+      weaving_material: '',
+      weaving_pattern: '',
+      weaving_color: '',
+      carving_style: '',
+      additional_specs: ''
+    })
+
+    // Scroll back to top for next item
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const removeItem = (itemId: string) => {
+    setOrderItems(prev => prev.filter(item => item.id !== itemId))
+  }
+
+  const startEditingQuantity = (itemId: string, currentQuantity: number) => {
+    setEditingItem(itemId)
+    setEditQuantity(currentQuantity.toString())
+  }
+
+  const cancelEditingQuantity = () => {
+    setEditingItem(null)
+    setEditQuantity('')
+  }
+
+  const updateItemQuantity = async (itemId: string) => {
+    const newQuantity = parseInt(editQuantity)
+    if (newQuantity < 1) {
+      return
+    }
+
+    setOrderItems(prev => prev.map(item => {
+      if (item.id === itemId) {
+        const newSubtotal = item.price * newQuantity
+        return {
+          ...item,
+          quantity: newQuantity,
+          subtotal: newSubtotal
+        }
+      }
+      return item
+    }))
+
+    setEditingItem(null)
+    setEditQuantity('')
+  }
+
+  const adjustQuantity = (itemId: string, adjustment: number) => {
+    setOrderItems(prev => prev.map(item => {
+      if (item.id === itemId) {
+        const newQuantity = Math.max(1, item.quantity + adjustment)
+        const newSubtotal = item.price * newQuantity
+        return {
+          ...item,
+          quantity: newQuantity,
+          subtotal: newSubtotal
+        }
+      }
+      return item
+    }))
+  }
+
+  const getTotalAmount = () => {
+    return orderItems.reduce((total, item) => total + item.subtotal, 0)
+  }
+
+  const handleSubmit = async () => {
+    if (orderItems.length === 0) {
+      toast.error('Please add at least one item to the order')
+      return
+    }
+
+    setLoading(true)
+
+    try {
+      const orderNumber = `ORD-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`
+      
+      const orderData = {
+        project_id: projectId,
+        order_number: orderNumber,
+        client_name: clientName,
+        items: orderItems,
+        total_amount: getTotalAmount(),
+        status: 'pending',
+        payment_status: 'pending',
+        estimated_delivery: estimatedDelivery,
+        created_at: new Date().toISOString()
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 1500))
+      
+      console.log('Order created:', orderData)
+      
+      router.push(`/dashboard/orders?created=${orderNumber}`)
+      
+    } catch (error) {
+      console.error('Error creating order:', error)
+      toast.error('Failed to create order. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Material options loaded from database - New hierarchical structure
+  interface FabricBrand {
+    id: string;
+    name: string;
+    price_modifier?: number;
+    collections: Array<{
+      id: string;
+      name: string;
+      price_modifier?: number;
+      colors: Array<{
+        id: string;
+        name: string;
+        price_modifier?: number;
+      }>;
+    }>;
+  }
+  
+  interface WoodType {
+    id: string;
+    name: string;
+    price_modifier?: number;
+    finishes: Array<{
+      id: string;
+      name: string;
+      price_modifier?: number;
+    }>;
+  }
+  
+  interface MetalType {
+    id: string;
+    name: string;
+    price_modifier?: number;
+    finishes: Array<{
+      id: string;
+      name: string;
+      price_modifier?: number;
+      colors: Array<{
+        id: string;
+        name: string;
+        price_modifier?: number;
+      }>;
+    }>;
+  }
+  
+  interface StoneType {
+    id: string;
+    name: string;
+    price_modifier?: number;
+    finishes: Array<{
+      id: string;
+      name: string;
+      price_modifier?: number;
+    }>;
+  }
+  
+  interface WeavingMaterial {
+    id: string;
+    name: string;
+    price_modifier?: number;
+    patterns: Array<{
+      id: string;
+      name: string;
+      price_modifier?: number;
+      colors: Array<{
+        id: string;
+        name: string;
+        price_modifier?: number;
+      }>;
+    }>;
+  }
+  
+  interface CarvingStyle {
+    id: string;
+    name: string;
+    price_modifier?: number;
+  }
+  
+  interface MaterialOptionsType {
+    fabric_brands: FabricBrand[];
+    wood_types: WoodType[];
+    metal_types: MetalType[];
+    stone_types: StoneType[];
+    weaving_materials: WeavingMaterial[];
+    carving_styles: CarvingStyle[];
+  }
+  
+  const [materialOptions, setMaterialOptions] = useState<MaterialOptionsType>({
+    fabric_brands: [],
+    wood_types: [],
+    metal_types: [],
+    stone_types: [],
+    weaving_materials: [],
+    carving_styles: []
+  })
+
+  // Function to continue to material selection
+  const continueToMaterials = () => {
+    if (!selectedCollection || !selectedItem || !price) {
+      toast.error('Please complete the item selection first')
+      return
+    }
+    setShowMaterials(true)
+    setCurrentStep('materials')
+    // Smooth scroll to material selection
+    setTimeout(() => {
+      const materialsSection = document.getElementById('materials-section')
+      if (materialsSection) {
+        materialsSection.scrollIntoView({ behavior: 'smooth' })
+      }
+    }, 100)
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <Link href="/dashboard/projects">
+                <Button variant="outline" size="sm">
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  Back to Projects
+                </Button>
+              </Link>
+              <div>
+                <h1 className="text-2xl font-bold text-slate-900">Add Order Items</h1>
+                <p className="text-slate-600 text-sm">Configure furniture items for this order</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex max-w-7xl mx-auto">
+        {/* Main Content */}
+        <div className="flex-1 p-6 space-y-6">
+          {/* Order Header Info */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="grid grid-cols-4 gap-4 text-sm">
+              <div>
+                <div className="text-slate-500 text-xs uppercase tracking-wide font-medium">ORDER ID</div>
+                <div className="font-semibold text-slate-900 mt-1">ORD-2025-001</div>
+              </div>
+              <div>
+                <div className="text-slate-500 text-xs uppercase tracking-wide font-medium">CLIENT</div>
+                <div className="font-semibold text-slate-900 mt-1">{clientName || 'Loading...'}</div>
+              </div>
+              <div>
+                <div className="text-slate-500 text-xs uppercase tracking-wide font-medium">PROJECT</div>
+                <div className="font-semibold text-slate-900 mt-1">{projectName || 'Loading...'}</div>
+              </div>
+              <div>
+                <div className="text-slate-500 text-xs uppercase tracking-wide font-medium">STATUS</div>
+                <div className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 mt-1">
+                  Draft
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Step 1: Item Selection */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="bg-blue-600 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm font-semibold">1</div>
+              <h2 className="text-lg font-semibold text-slate-900">Item Selection</h2>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-sm font-medium text-slate-600">Collection</Label>
+                  <Select value={selectedCollection} onValueChange={setSelectedCollection}>
+                    <SelectTrigger className="mt-2">
+                      <SelectValue placeholder="Select collection" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {collections.map((collection) => (
+                        <SelectItem key={collection.id} value={collection.id}>
+                          {collection.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label className="text-sm font-medium text-slate-600">Item</Label>
+                  <Select 
+                    value={selectedItem} 
+                    onValueChange={(value) => {
+                      setSelectedItem(value)
+                      const item = items.find(i => i.id === value)
+                      if (item) {
+                        setPrice(item.base_price.toString())
+                      }
+                    }}
+                    disabled={!selectedCollection}
+                  >
+                    <SelectTrigger className="mt-2">
+                      <SelectValue placeholder="Select item" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {items.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {item.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <Label className="text-sm font-medium text-slate-600">Price ($)</Label>
+                  <Input
+                    type="number"
+                    value={price}
+                    onChange={(e) => setPrice(e.target.value)}
+                    placeholder="0.00"
+                    min="0"
+                    step="0.01"
+                    className="mt-2"
+                  />
+                </div>
+
+                <div>
+                  <Label className="text-sm font-medium text-slate-600">Quantity</Label>
+                  <Input
+                    type="number"
+                    value={quantity}
+                    onChange={(e) => setQuantity(e.target.value)}
+                    min="1"
+                    className="mt-2"
+                  />
+                </div>
+
+              </div>
+
+              {price && quantity && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-lg font-semibold text-slate-900">Price Calculation:</span>
+                    <div className="text-right">
+                      <div className="text-2xl font-bold text-blue-600">${calculateDisplayPrice().toFixed(2)}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {selectedItem && price && (
+                <div className="flex justify-center pt-4">
+                  <Button 
+                    onClick={continueToMaterials}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3"
+                  >
+                    Continue to Material Selection
+                    <ArrowDown className="ml-2 h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Step 2: Material Selection - Only show when user clicks continue */}
+          {showMaterials && (
+            <div id="materials-section" className="bg-white rounded-lg border border-gray-200 p-6">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="bg-blue-600 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm font-semibold">2</div>
+                <h2 className="text-lg font-semibold text-slate-900">Material Selection</h2>
+                <div className="text-sm text-slate-500 bg-gray-100 px-3 py-1 rounded-full">Optional</div>
+              </div>
+
+              <div className="space-y-6">
+                {/* Fabric Selection */}
+                <div className="grid grid-cols-3 gap-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <div>
+                    <Label className="text-sm font-medium text-blue-900">Fabric Brand</Label>
+                    <Select 
+                      value={materialSelections.fabric_brand} 
+                      onValueChange={(value) => setMaterialSelections(prev => ({
+                        ...prev,
+                        fabric_brand: value,
+                        fabric_collection: '', // Reset dependent selections
+                        fabric_color: ''
+                      }))}
+                    >
+                      <SelectTrigger className="mt-2">
+                        <SelectValue placeholder="Select brand" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(materialOptions.fabric_brands || []).map((brand) => (
+                          <SelectItem key={brand.id} value={brand.name}>
+                            {brand.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label className="text-sm font-medium text-blue-900">Collection</Label>
+                    <Select 
+                      value={materialSelections.fabric_collection}
+                      onValueChange={(value) => setMaterialSelections(prev => ({
+                        ...prev,
+                        fabric_collection: value,
+                        fabric_color: '' // Reset color when collection changes
+                      }))}
+                      disabled={!materialSelections.fabric_brand}
+                    >
+                      <SelectTrigger className="mt-2">
+                        <SelectValue placeholder="Select collection" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {materialSelections.fabric_brand && 
+                          materialOptions.fabric_brands
+                            .find(brand => brand.name === materialSelections.fabric_brand)
+                            ?.collections.map((collection) => (
+                              <SelectItem key={collection.id} value={collection.name}>
+                                {collection.name}
+                              </SelectItem>
+                            ))
+                        }
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label className="text-sm font-medium text-blue-900">Color</Label>
+                    <Select 
+                      value={materialSelections.fabric_color}
+                      onValueChange={(value) => setMaterialSelections(prev => ({
+                        ...prev,
+                        fabric_color: value
+                      }))}
+                      disabled={!materialSelections.fabric_collection}
+                    >
+                      <SelectTrigger className="mt-2">
+                        <SelectValue placeholder="Select color" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {materialSelections.fabric_collection && 
+                          materialOptions.fabric_brands
+                            .find(brand => brand.name === materialSelections.fabric_brand)
+                            ?.collections.find(collection => collection.name === materialSelections.fabric_collection)
+                            ?.colors.map((color) => (
+                              <SelectItem key={color.id} value={color.name}>
+                                {color.name}
+                              </SelectItem>
+                            ))
+                        }
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Wood Selection - Cascading: Type -> Finish */}
+                <div className="grid grid-cols-2 gap-4 p-4 bg-green-50 rounded-lg border border-green-200">
+                  <div>
+                    <Label className="text-sm font-medium text-green-900">Wood Type</Label>
+                    <Select 
+                      value={materialSelections.wood_type}
+                      onValueChange={(value) => setMaterialSelections(prev => ({
+                        ...prev,
+                        wood_type: value,
+                        wood_finish: '' // Reset finish when type changes
+                      }))}
+                    >
+                      <SelectTrigger className="mt-2">
+                        <SelectValue placeholder="Select wood type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(materialOptions.wood_types || []).map((wood) => (
+                          <SelectItem key={wood.id} value={wood.name}>
+                            {wood.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label className="text-sm font-medium text-green-900">Wood Finish</Label>
+                    <Select 
+                      value={materialSelections.wood_finish}
+                      onValueChange={(value) => setMaterialSelections(prev => ({
+                        ...prev,
+                        wood_finish: value
+                      }))}
+                      disabled={!materialSelections.wood_type}
+                    >
+                      <SelectTrigger className="mt-2">
+                        <SelectValue placeholder={materialSelections.wood_type ? "Select finish" : "Select wood type first"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {materialSelections.wood_type && 
+                          materialOptions.wood_types
+                            .find(wood => wood.name === materialSelections.wood_type)
+                            ?.finishes.map((finish) => (
+                              <SelectItem key={finish.id} value={finish.name}>
+                                {finish.name}
+                              </SelectItem>
+                            ))
+                        }
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Metal Options - Cascading: Type -> Finish -> Color */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-slate-900">Metal Options</h3>
+                    <span className="text-sm text-slate-500">Type → Finish → Color</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <div>
+                      <Label className="text-sm font-medium text-slate-600">TYPE</Label>
+                      <Select 
+                        value={materialSelections.metal_type}
+                        onValueChange={(value) => setMaterialSelections(prev => ({
+                          ...prev,
+                          metal_type: value,
+                          metal_finish: '', // Reset finish when type changes
+                          metal_color: ''   // Reset color when type changes
+                        }))}
+                      >
+                        <SelectTrigger className="mt-2">
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(materialOptions.metal_types || []).map((metal) => (
+                            <SelectItem key={metal.id} value={metal.name}>
+                              {metal.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium text-slate-600">FINISH</Label>
+                      <Select 
+                        value={materialSelections.metal_finish}
+                        onValueChange={(value) => setMaterialSelections(prev => ({
+                          ...prev,
+                          metal_finish: value,
+                          metal_color: '' // Reset color when finish changes
+                        }))}
+                        disabled={!materialSelections.metal_type}
+                      >
+                        <SelectTrigger className="mt-2">
+                          <SelectValue placeholder={materialSelections.metal_type ? "Select finish" : "Select type first"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {materialSelections.metal_type && 
+                            materialOptions.metal_types
+                              .find(metal => metal.name === materialSelections.metal_type)
+                              ?.finishes.map((finish) => (
+                                <SelectItem key={finish.id} value={finish.name}>
+                                  {finish.name}
+                                </SelectItem>
+                              ))
+                          }
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium text-slate-600">COLOR</Label>
+                      <Select 
+                        value={materialSelections.metal_color}
+                        onValueChange={(value) => setMaterialSelections(prev => ({
+                          ...prev,
+                          metal_color: value
+                        }))}
+                        disabled={!materialSelections.metal_finish}
+                      >
+                        <SelectTrigger className="mt-2">
+                          <SelectValue placeholder={materialSelections.metal_finish ? "Select color" : "Select finish first"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {materialSelections.metal_finish && 
+                            materialOptions.metal_types
+                              .find(metal => metal.name === materialSelections.metal_type)
+                              ?.finishes.find(finish => finish.name === materialSelections.metal_finish)
+                              ?.colors.map((color) => (
+                                <SelectItem key={color.id} value={color.name}>
+                                  {color.name}
+                                </SelectItem>
+                              ))
+                          }
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Stone Options - Type, Finish (2 columns) */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-slate-900">Stone Options</h3>
+                    <span className="text-sm text-slate-500">Type - Finish</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <div>
+                      <Label className="text-sm font-medium text-slate-600">TYPE</Label>
+                      <Select 
+                        value={materialSelections.stone_type}
+                        onValueChange={(value) => setMaterialSelections(prev => ({
+                          ...prev,
+                          stone_type: value,
+                          stone_finish: '' // Reset finish when type changes
+                        }))}
+                      >
+                        <SelectTrigger className="mt-2">
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(materialOptions.stone_types || []).map((stone) => (
+                            <SelectItem key={stone.id} value={stone.name}>
+                              {stone.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium text-slate-600">FINISH</Label>
+                      <Select 
+                        value={materialSelections.stone_finish}
+                        onValueChange={(value) => setMaterialSelections(prev => ({
+                          ...prev,
+                          stone_finish: value
+                        }))}
+                        disabled={!materialSelections.stone_type}
+                      >
+                        <SelectTrigger className="mt-2">
+                          <SelectValue placeholder={materialSelections.stone_type ? "Select finish" : "Select stone type first"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {materialSelections.stone_type && 
+                            materialOptions.stone_types
+                              .find(stone => stone.name === materialSelections.stone_type)
+                              ?.finishes.map((finish) => (
+                                <SelectItem key={finish.id} value={finish.name}>
+                                  {finish.name}
+                                </SelectItem>
+                              ))
+                          }
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Weave Options - Material, Pattern, Color (3 columns) */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-slate-900">Weave Options</h3>
+                    <span className="text-sm text-slate-500">Material - Pattern - Color</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <div>
+                      <Label className="text-sm font-medium text-slate-600">MATERIAL</Label>
+                      <Select 
+                        value={materialSelections.weaving_material}
+                        onValueChange={(value) => setMaterialSelections(prev => ({
+                          ...prev,
+                          weaving_material: value,
+                          weaving_pattern: '', // Reset pattern when material changes
+                          weaving_color: ''    // Reset color when material changes
+                        }))}
+                      >
+                        <SelectTrigger className="mt-2">
+                          <SelectValue placeholder="Select material" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(materialOptions.weaving_materials || []).map((weave) => (
+                            <SelectItem key={weave.id} value={weave.name}>
+                              {weave.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium text-slate-600">PATTERN</Label>
+                      <Select 
+                        value={materialSelections.weaving_pattern}
+                        onValueChange={(value) => setMaterialSelections(prev => ({
+                          ...prev,
+                          weaving_pattern: value,
+                          weaving_color: '' // Reset color when pattern changes
+                        }))}
+                        disabled={!materialSelections.weaving_material}
+                      >
+                        <SelectTrigger className="mt-2">
+                          <SelectValue placeholder={materialSelections.weaving_material ? "Select pattern" : "Select material first"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {materialSelections.weaving_material && 
+                            materialOptions.weaving_materials
+                              .find(material => material.name === materialSelections.weaving_material)
+                              ?.patterns.map((pattern) => (
+                                <SelectItem key={pattern.id} value={pattern.name}>
+                                  {pattern.name}
+                                </SelectItem>
+                              ))
+                          }
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium text-slate-600">COLOR</Label>
+                      <Select 
+                        value={materialSelections.weaving_color}
+                        onValueChange={(value) => setMaterialSelections(prev => ({
+                          ...prev,
+                          weaving_color: value
+                        }))}
+                        disabled={!materialSelections.weaving_pattern}
+                      >
+                        <SelectTrigger className="mt-2">
+                          <SelectValue placeholder={materialSelections.weaving_pattern ? "Select color" : "Select pattern first"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {materialSelections.weaving_pattern && 
+                            materialOptions.weaving_materials
+                              .find(material => material.name === materialSelections.weaving_material)
+                              ?.patterns.find(pattern => pattern.name === materialSelections.weaving_pattern)
+                              ?.colors.map((color) => (
+                                <SelectItem key={color.id} value={color.name}>
+                                  {color.name}
+                                </SelectItem>
+                              ))
+                          }
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Carving Options - Style Only (1 column) */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-slate-900">Carving Options</h3>
+                    <span className="text-sm text-slate-500">Style Only</span>
+                  </div>
+                  <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <div className="max-w-xs">
+                      <Label className="text-sm font-medium text-slate-600">STYLE NAME</Label>
+                      <Select 
+                        value={materialSelections.carving_style}
+                        onValueChange={(value) => setMaterialSelections(prev => ({
+                          ...prev,
+                          carving_style: value
+                        }))}
+                      >
+                        <SelectTrigger className="mt-2">
+                          <SelectValue placeholder="Select style" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(materialOptions.carving_styles || []).map((carving) => (
+                            <SelectItem key={carving.id} value={carving.name}>
+                              {carving.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Additional Specs - Custom specifications */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-slate-900">Additional Specs</h3>
+                    <span className="text-sm text-slate-500">Custom specifications</span>
+                  </div>
+                  <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <div>
+                      <Label className="text-sm font-medium text-slate-600">SPEC NAME</Label>
+                      <Input
+                        className="mt-2"
+                        placeholder="Enter custom specification"
+                        value={materialSelections.additional_specs}
+                        onChange={(e) => setMaterialSelections(prev => ({
+                          ...prev,
+                          additional_specs: e.target.value
+                        }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-center pt-4">
+                  <Button 
+                    onClick={addItemToOrder} 
+                    className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-semibold transition-all duration-200"
+                  >
+                    <Package className="h-4 w-4 mr-2" />
+                    Add to Order
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Order Items Sidebar */}
+        <div className="w-96 bg-white/95 backdrop-blur-sm border-l border-white/20 p-6">
+          <div className="space-y-6">
+            <div className="text-center pb-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-slate-900 flex items-center justify-center gap-2">
+                Order Items
+              </h2>
+              <div className="text-2xl font-bold text-blue-600 mt-2">
+                Total: ${getTotalAmount().toFixed(2)}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {orderItems.length === 0 ? (
+                <div className="text-center text-slate-500 py-12">
+                  <ShoppingCart className="h-16 w-16 mx-auto mb-4 text-slate-500" />
+                  <p className="text-lg font-medium mb-2">No items added yet</p>
+                  <p className="text-sm">Configure an item and add it to the order</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {orderItems.map((item, index) => (
+                    <div key={item.id} className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
+                      <div className="flex justify-between items-start mb-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded font-medium">
+                              #{index + 1}
+                            </div>
+                            <h4 className="font-semibold text-slate-900 text-sm">{item.item_name}</h4>
+                          </div>
+                          <p className="text-xs text-slate-600 mb-2">{item.collection_name}</p>
+                        </div>
+                        <Button 
+                          size="sm" 
+                          variant="ghost" 
+                          onClick={() => removeItem(item.id)}
+                          className="h-8 w-8 p-1 hover:bg-red-100 hover:text-red-600 border border-gray-200"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      
+                      <div className="space-y-2 text-xs">
+                        <div className="space-y-1">
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Full Material SKU:</span>
+                            <span className="font-mono text-xs">{item.sku}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500">Client/Order SKU:</span>
+                            <span className="font-mono text-xs">{item.client_sku}</span>
+                          </div>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-500">Quantity:</span>
+                          {editingItem === item.id ? (
+                            <div className="flex items-center gap-1">
+                              <Input
+                                type="number"
+                                min="1"
+                                value={editQuantity}
+                                onChange={(e) => setEditQuantity(e.target.value)}
+                                className="w-16 h-6 text-xs p-1"
+                              />
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => updateItemQuantity(item.id)}
+                                className="h-6 w-6 p-0 hover:bg-green-100 hover:text-green-600"
+                              >
+                                <Check className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={cancelEditingQuantity}
+                                className="h-6 w-6 p-0 hover:bg-gray-100 hover:text-slate-600"
+                              >
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => adjustQuantity(item.id, -1)}
+                                disabled={item.quantity <= 1}
+                                className="h-7 w-7 p-1 hover:bg-red-100 hover:text-red-600 disabled:opacity-50 border border-gray-200"
+                              >
+                                <Minus className="h-4 w-4" />
+                              </Button>
+                              <span className="min-w-8 text-center font-medium">{item.quantity}</span>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => adjustQuantity(item.id, 1)}
+                                className="h-7 w-7 p-1 hover:bg-green-100 hover:text-green-600 border border-gray-200"
+                              >
+                                <Plus className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => startEditingQuantity(item.id, item.quantity)}
+                                className="h-7 w-7 p-1 hover:bg-blue-100 hover:text-blue-600 ml-1 border border-gray-200"
+                              >
+                                <Edit2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Unit Price:</span>
+                          <span>${item.price}</span>
+                        </div>
+                        <div className="flex justify-between pt-1 border-t border-gray-100">
+                          <span className="font-semibold">Subtotal:</span>
+                          <span className="font-semibold text-blue-600">${item.subtotal.toFixed(2)}</span>
+                        </div>
+                      </div>
+
+                      {Object.entries(item.materials).some(([, value]) => value) && (
+                        <div className="mt-3 pt-3 border-t border-gray-100">
+                          <div className="text-xs text-slate-500 mb-2">Materials:</div>
+                          <div className="space-y-1">
+                            {Object.entries(item.materials).map(([type, value]) => 
+                              value && (
+                                <div key={type} className="text-xs bg-gray-50 px-2 py-1 rounded">
+                                  <span className="font-medium capitalize">{safeFormatString(type, 'material')}:</span> {value}
+                                </div>
+                              )
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+
+                  <div className="sticky bottom-0 bg-white/95 backdrop-blur-sm p-4 -mx-6 border-t border-gray-200">
+                    <Button 
+                      onClick={handleSubmit} 
+                      disabled={loading || orderItems.length === 0}
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-semibold"
+                      size="lg"
+                    >
+                      <Save className="h-4 w-4 mr-2" />
+                      {loading ? 'Submitting Order...' : 'Submit Order for Production'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

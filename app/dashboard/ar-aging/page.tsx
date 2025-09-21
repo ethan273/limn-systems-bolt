@@ -1,0 +1,643 @@
+'use client'
+
+import React, { useState, useEffect, useCallback } from 'react'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { PageWrapper } from '@/components/layouts/page-wrapper'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Progress } from '@/components/ui/progress'
+import { 
+  Clock,
+  DollarSign,
+  AlertTriangle,
+  TrendingUp,
+  TrendingDown,
+  Phone,
+  Mail,
+  Calendar,
+  FileText,
+  Download,
+  RefreshCw,
+  MoreHorizontal,
+  Eye,
+  AlertCircle
+} from 'lucide-react'
+import { safeFormatString } from '@/lib/utils/string-helpers'
+import { DropdownMenuRoot as DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+
+// Type definitions for comprehensive AR aging
+interface ArAgingBucket {
+  range: string
+  days_min: number
+  days_max: number | null
+  count: number
+  total_amount: number
+  percentage: number
+  color: string
+  risk_level: 'low' | 'medium' | 'high' | 'critical'
+}
+
+interface CustomerArSummary {
+  customer_id: string
+  customer_name: string
+  company_name: string
+  total_outstanding: number
+  oldest_invoice_days: number
+  invoice_count: number
+  contact_email: string
+  contact_phone: string
+  last_payment_date: string | null
+  last_contact_date: string | null
+  credit_limit: number
+  payment_terms: string
+  risk_score: number
+  collection_status: 'current' | 'follow_up' | 'collections' | 'legal' | 'write_off'
+  buckets: {
+    current: number
+    days_1_15: number
+    days_16_30: number
+    days_31_45: number
+    days_46_60: number
+    days_61_90: number
+    days_over_90: number
+  }
+}
+
+interface ArAgingSummary {
+  total_outstanding: number
+  total_overdue: number
+  weighted_average_days: number
+  dso: number // Days Sales Outstanding
+  collection_efficiency: number
+  aging_buckets: ArAgingBucket[]
+  trending: {
+    current_vs_prior: number
+    improvement_trend: 'improving' | 'stable' | 'deteriorating'
+  }
+}
+
+interface CollectionActivity {
+  id: string
+  customer_id: string
+  customer_name: string
+  activity_type: 'call' | 'email' | 'letter' | 'meeting' | 'payment_plan' | 'legal_notice'
+  description: string
+  created_date: string
+  created_by: string
+  next_action_date: string | null
+  status: 'completed' | 'scheduled' | 'overdue'
+}
+
+export default function ArAgingDashboard() {
+  // State management for comprehensive AR aging
+  const [agingSummary, setAgingSummary] = useState<ArAgingSummary | null>(null)
+  const [customerDetails, setCustomerDetails] = useState<CustomerArSummary[]>([])
+  const [collectionActivities, setCollectionActivities] = useState<CollectionActivity[]>([])
+  const [loading, setLoading] = useState(true)
+  const [selectedTab, setSelectedTab] = useState('overview')
+  const [filters, setFilters] = useState({
+    risk_level: 'all',
+    collection_status: 'all',
+    days_outstanding: 'all',
+    search: '',
+    sort_by: 'total_outstanding',
+    sort_order: 'desc'
+  })
+
+  // Fetch comprehensive AR aging data
+  const fetchArAgingData = useCallback(async () => {
+    setLoading(true)
+    try {
+      // Fetch AR aging summary with buckets
+      const summaryResponse = await fetch('/api/ar-aging/summary')
+      const summaryData = await summaryResponse.json()
+      
+      // Fetch customer AR details
+      const customersResponse = await fetch('/api/ar-aging/customers?' + new URLSearchParams(filters))
+      const customersData = await customersResponse.json()
+
+      // Fetch collection activities
+      const activitiesResponse = await fetch('/api/ar-aging/collection-activities')
+      const activitiesData = await activitiesResponse.json()
+
+      setAgingSummary(summaryData.data || null)
+      setCustomerDetails(customersData.data || [])
+      setCollectionActivities(activitiesData.data || [])
+    } catch (error) {
+      console.error('Failed to fetch AR aging data:', error)
+    } finally {
+      setLoading(false)
+    }
+  }, [filters])
+
+  // Initial load
+  useEffect(() => {
+    fetchArAgingData()
+  }, [fetchArAgingData])
+
+  // Format currency
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD'
+    }).format(amount)
+  }
+
+  // Format date
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    })
+  }
+
+
+  // Get collection status styling - standardized with design system
+  const getCollectionStatusColor = (status: string) => {
+    switch (status) {
+      case 'current': return 'bg-success-100 text-success-800'
+      case 'follow_up': return 'bg-info-100 text-info-800'
+      case 'collections': return 'bg-warning-100 text-warning-800'
+      case 'legal': return 'bg-error-100 text-error-800'
+      case 'write_off': return 'bg-neutral-100 text-neutral-800'
+      default: return 'bg-neutral-100 text-neutral-800'
+    }
+  }
+
+  // Handle collection activity
+  const handleCollectionAction = async (customerId: string, action: string) => {
+    try {
+      await fetch('/api/ar-aging/collection-activities', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_id: customerId,
+          activity_type: action,
+          description: `${action} initiated from AR aging dashboard`,
+          created_by: 'current_user' // Would be actual user ID
+        })
+      })
+      fetchArAgingData() // Refresh data
+    } catch (error) {
+      console.error('Failed to create collection activity:', error)
+    }
+  }
+
+  // Export functionality
+  const handleExport = async (type: 'csv' | 'excel') => {
+    const response = await fetch('/api/ar-aging/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, filters })
+    })
+    
+    if (response.ok) {
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.style.display = 'none'
+      a.href = url
+      a.download = `ar_aging_${new Date().toISOString().split('T')[0]}.${type}`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex-1 space-y-6 p-8 pt-6">
+        <div className="flex items-center justify-center h-96">
+          <RefreshCw className="w-8 h-8 animate-spin text-neutral-400" />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <PageWrapper 
+      title="AR Aging Dashboard"
+      description="Comprehensive accounts receivable analysis with 15/30/45/60/90+ aging buckets and collections workflow"
+    >
+      <div className="space-y-6">
+        {/* Header Actions */}
+        <div className="flex items-center justify-between -mt-4">
+          <div></div>
+          <div className="flex items-center space-x-2">
+            <Button variant="outline" onClick={() => handleExport('csv')}>
+              <Download className="w-4 h-4 mr-2" />
+              Export CSV
+            </Button>
+            <Button variant="outline" onClick={() => handleExport('excel')}>
+              <Download className="w-4 h-4 mr-2" />
+              Export Excel
+            </Button>
+            <Button onClick={fetchArAgingData}>
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Refresh
+            </Button>
+          </div>
+        </div>
+
+        {/* Summary Cards */}
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+        <Card className="bg-white border border-neutral-200 rounded-lg shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-neutral-900">Total Outstanding</CardTitle>
+            <DollarSign className="h-4 w-4 text-info-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {formatCurrency(agingSummary?.total_outstanding || 0)}
+            </div>
+            <p className="text-xs text-neutral-500">
+              Across all customers
+            </p>
+          </CardContent>
+        </Card>
+        
+        <Card className="bg-white border border-neutral-200 rounded-lg shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-neutral-900">Total Overdue</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-error-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-error-600">
+              {formatCurrency(agingSummary?.total_overdue || 0)}
+            </div>
+            <p className="text-xs text-neutral-500">
+              Past due invoices
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-white border border-neutral-200 rounded-lg shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-neutral-900">Average DSO</CardTitle>
+            <Clock className="h-4 w-4 text-warning-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {agingSummary?.dso || 0} days
+            </div>
+            <p className="text-xs text-neutral-500">
+              Days sales outstanding
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-white border border-neutral-200 rounded-lg shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-neutral-900">Collection Rate</CardTitle>
+            <TrendingUp className="h-4 w-4 text-success-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-success-600">
+              {agingSummary?.collection_efficiency || 0}%
+            </div>
+            <p className="text-xs text-neutral-500">
+              This month efficiency
+            </p>
+          </CardContent>
+        </Card>
+        </div>
+
+        {/* Main Content Tabs */}
+        <Tabs value={selectedTab} onValueChange={setSelectedTab}>
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="overview">Aging Overview</TabsTrigger>
+          <TabsTrigger value="customers">Customer Details</TabsTrigger>
+          <TabsTrigger value="collections">Collections</TabsTrigger>
+          <TabsTrigger value="analytics">Analytics</TabsTrigger>
+        </TabsList>
+
+        {/* Aging Overview Tab */}
+        <TabsContent value="overview" className="space-y-6">
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* Aging Buckets */}
+            <Card className="col-span-1 bg-white border border-neutral-200 rounded-lg shadow-sm">
+              <CardHeader className="mb-4">
+                <CardTitle className="text-lg font-medium text-neutral-900">AR Aging Buckets</CardTitle>
+                <CardDescription className="text-sm text-neutral-600">Outstanding amounts by aging period</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {agingSummary?.aging_buckets.map((bucket, index) => (
+                    <div key={index} className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div className={`w-3 h-3 rounded-full`} style={{ backgroundColor: bucket.color }}></div>
+                        <div>
+                          <p className="font-medium">{bucket.range}</p>
+                          <p className="text-sm text-neutral-600">
+                            {bucket.count} invoices
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-medium">{formatCurrency(bucket.total_amount)}</p>
+                        <p className="text-sm text-slate-500">{bucket.percentage}%</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-4 space-y-2">
+                  {agingSummary?.aging_buckets.map((bucket, index) => (
+                    <div key={index} className="flex items-center justify-between text-sm">
+                      <span>{bucket.range}</span>
+                      <Progress 
+                        value={bucket.percentage} 
+                        className="w-24 h-2"
+                        style={{ 
+                          '--progress-background': bucket.color 
+                        } as React.CSSProperties}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Risk Distribution */}
+            <Card className="col-span-1">
+              <CardHeader>
+                <CardTitle>Collection Risk Analysis</CardTitle>
+                <CardDescription>Customer risk distribution</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {(['low', 'medium', 'high', 'critical'] as const).map((risk) => {
+                    const count = customerDetails.filter(c => {
+                      // Calculate risk based on aging
+                      if (c.buckets.days_over_90 > 0) return risk === 'critical'
+                      if (c.buckets.days_61_90 > 0) return risk === 'high'
+                      if (c.buckets.days_31_45 > 0 || c.buckets.days_46_60 > 0) return risk === 'medium'
+                      return risk === 'low'
+                    }).length
+                    
+                    const total = customerDetails.filter(c => {
+                      // Calculate risk based on aging
+                      if (c.buckets.days_over_90 > 0) return risk === 'critical'
+                      if (c.buckets.days_61_90 > 0) return risk === 'high'
+                      if (c.buckets.days_31_45 > 0 || c.buckets.days_46_60 > 0) return risk === 'medium'
+                      return risk === 'low'
+                    }).reduce((sum, c) => sum + c.total_outstanding, 0)
+
+                    return (
+                      <div key={risk} className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          <AlertCircle className={`w-4 h-4 ${
+                            risk === 'critical' ? 'text-red-500' :
+                            risk === 'high' ? 'text-orange-500' :
+                            risk === 'medium' ? 'text-yellow-500' : 'text-green-500'
+                          }`} />
+                          <div>
+                            <p className="font-medium capitalize">{risk} Risk</p>
+                            <p className="text-sm text-neutral-600">
+                              {count} customers
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-medium">{formatCurrency(total)}</p>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* Customer Details Tab */}
+        <TabsContent value="customers" className="space-y-4">
+          {/* Filters */}
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center space-x-4">
+                <Input
+                  placeholder="Search customers..."
+                  value={filters.search}
+                  onChange={(e) => setFilters({...filters, search: e.target.value})}
+                  className="max-w-sm"
+                />
+                <Select value={filters.collection_status} onValueChange={(value) => setFilters({...filters, collection_status: value})}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Collection status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="current">Current</SelectItem>
+                    <SelectItem value="follow_up">Follow Up</SelectItem>
+                    <SelectItem value="collections">Collections</SelectItem>
+                    <SelectItem value="legal">Legal</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={filters.days_outstanding} onValueChange={(value) => setFilters({...filters, days_outstanding: value})}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Days outstanding" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Periods</SelectItem>
+                    <SelectItem value="current">Current (0-15)</SelectItem>
+                    <SelectItem value="early">Early (16-30)</SelectItem>
+                    <SelectItem value="moderate">Moderate (31-60)</SelectItem>
+                    <SelectItem value="late">Late (60+)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Customer AR Details Table */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Customer AR Details</CardTitle>
+              <CardDescription>Complete aging breakdown by customer</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Customer</TableHead>
+                    <TableHead>Total Outstanding</TableHead>
+                    <TableHead>Current</TableHead>
+                    <TableHead>1-15 Days</TableHead>
+                    <TableHead>16-30 Days</TableHead>
+                    <TableHead>31-45 Days</TableHead>
+                    <TableHead>46-60 Days</TableHead>
+                    <TableHead>61-90 Days</TableHead>
+                    <TableHead>90+ Days</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {customerDetails.slice(0, 50).map((customer) => (
+                    <TableRow key={customer.customer_id}>
+                      <TableCell>
+                        <div>
+                          <p className="font-medium">{customer.customer_name}</p>
+                          <p className="text-sm text-neutral-600">{customer.company_name}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {formatCurrency(customer.total_outstanding)}
+                      </TableCell>
+                      <TableCell className="text-green-600">
+                        {formatCurrency(customer.buckets.current)}
+                      </TableCell>
+                      <TableCell className="text-blue-600">
+                        {formatCurrency(customer.buckets.days_1_15)}
+                      </TableCell>
+                      <TableCell className="text-yellow-600">
+                        {formatCurrency(customer.buckets.days_16_30)}
+                      </TableCell>
+                      <TableCell className="text-orange-600">
+                        {formatCurrency(customer.buckets.days_31_45)}
+                      </TableCell>
+                      <TableCell className="text-orange-700">
+                        {formatCurrency(customer.buckets.days_46_60)}
+                      </TableCell>
+                      <TableCell className="text-red-600">
+                        {formatCurrency(customer.buckets.days_61_90)}
+                      </TableCell>
+                      <TableCell className="text-red-700 font-medium">
+                        {formatCurrency(customer.buckets.days_over_90)}
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={getCollectionStatusColor(customer.collection_status)}>
+                          {safeFormatString(customer.collection_status, 'active')}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" className="h-8 w-8 p-0">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem>
+                              <Eye className="h-4 w-4 mr-2" />
+                              View Details
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleCollectionAction(customer.customer_id, 'call')}>
+                              <Phone className="h-4 w-4 mr-2" />
+                              Schedule Call
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleCollectionAction(customer.customer_id, 'email')}>
+                              <Mail className="h-4 w-4 mr-2" />
+                              Send Email
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleCollectionAction(customer.customer_id, 'letter')}>
+                              <FileText className="h-4 w-4 mr-2" />
+                              Send Letter
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Collections Tab */}
+        <TabsContent value="collections" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Collection Activities</CardTitle>
+              <CardDescription>Recent collection activities and follow-ups</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {collectionActivities.slice(0, 20).map((activity) => (
+                  <div key={activity.id} className="flex items-center justify-between p-4 border rounded-lg">
+                    <div className="flex items-center space-x-4">
+                      <div className="p-2 bg-gray-100 rounded-full">
+                        {activity.activity_type === 'call' && <Phone className="w-4 h-4" />}
+                        {activity.activity_type === 'email' && <Mail className="w-4 h-4" />}
+                        {activity.activity_type === 'letter' && <FileText className="w-4 h-4" />}
+                        {activity.activity_type === 'meeting' && <Calendar className="w-4 h-4" />}
+                      </div>
+                      <div>
+                        <p className="font-medium">{activity.customer_name}</p>
+                        <p className="text-sm text-slate-500">{activity.description}</p>
+                        <p className="text-xs text-neutral-500">
+                          {formatDate(activity.created_date)} by {activity.created_by}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <Badge className={
+                        activity.status === 'completed' ? 'bg-green-100 text-green-800' :
+                        activity.status === 'scheduled' ? 'bg-blue-100 text-blue-800' :
+                        'bg-red-100 text-red-800'
+                      }>
+                        {activity.status}
+                      </Badge>
+                      {activity.next_action_date && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          Next: {formatDate(activity.next_action_date)}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Analytics Tab */}
+        <TabsContent value="analytics" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>AR Analytics & Trends</CardTitle>
+              <CardDescription>Detailed analysis of accounts receivable performance</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <h4 className="font-medium mb-2">Collection Efficiency Trend</h4>
+                  <p className="text-sm text-slate-500">
+                    Trending {agingSummary?.trending.improvement_trend || 'stable'} compared to prior period
+                  </p>
+                  <div className="mt-2 flex items-center space-x-2">
+                    {agingSummary?.trending.improvement_trend === 'improving' ? (
+                      <TrendingUp className="w-4 h-4 text-green-600" />
+                    ) : agingSummary?.trending.improvement_trend === 'deteriorating' ? (
+                      <TrendingDown className="w-4 h-4 text-red-600" />
+                    ) : (
+                      <div className="w-4 h-4 bg-yellow-400 rounded-full"></div>
+                    )}
+                    <span className="text-sm">
+                      {agingSummary?.trending.current_vs_prior || 0}% vs prior period
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <h4 className="font-medium mb-2">Key Metrics</h4>
+                  <div className="space-y-1 text-sm">
+                    <p>Weighted Average Days: {agingSummary?.weighted_average_days || 0}</p>
+                    <p>Total Customers: {customerDetails.length}</p>
+                    <p>At Risk Customers: {customerDetails.filter(c => c.buckets.days_over_90 > 0).length}</p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+        </Tabs>
+      </div>
+    </PageWrapper>
+  )
+}

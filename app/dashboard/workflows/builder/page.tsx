@@ -1,0 +1,599 @@
+'use client'
+
+import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { 
+  Save, 
+  Play, 
+  ArrowLeft,
+  Plus,
+  Trash2,
+  Mail,
+  MessageSquare,
+  Database,
+  CheckCircle,
+  GitBranch
+} from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { safeGet } from '@/lib/utils/bulk-type-fixes'
+import { safeFormatString } from '@/lib/utils/string-helpers'
+
+interface WorkflowAction {
+  id: string
+  type: 'create_task' | 'send_email' | 'notify_slack' | 'update_record' | 'send_sms'
+  name: string
+  config: unknown
+  required: boolean
+}
+
+interface ActionType {
+  type: string
+  name: string
+  icon: unknown
+  color: string
+  defaultConfig: unknown
+}
+
+interface WorkflowCondition {
+  field: string
+  operator: '=' | '!=' | '>' | '<' | 'contains'
+  value: unknown
+}
+
+export default function WorkflowBuilderPage() {
+  const router = useRouter()
+  const [workflowName, setWorkflowName] = useState('New Workflow')
+  const [workflowDescription, setWorkflowDescription] = useState('')
+  const [triggerType, setTriggerType] = useState('order_created')
+  const [actions, setActions] = useState<WorkflowAction[]>([])
+  const [conditions, setConditions] = useState<WorkflowCondition[]>([])
+  const [saving, setSaving] = useState(false)
+
+  const triggerTypes = [
+    { value: 'order_created', label: 'Order Created', icon: '📦' },
+    { value: 'status_change', label: 'Status Changed', icon: '🔄' },
+    { value: 'payment_received', label: 'Payment Received', icon: '💰' },
+    { value: 'production_delayed', label: 'Production Delayed', icon: '⚠️' },
+    { value: 'schedule', label: 'Scheduled', icon: '⏰' },
+  ]
+
+  const actionTypes = [
+    { 
+      type: 'create_task', 
+      name: 'Create Task', 
+      icon: CheckCircle, 
+      color: 'bg-blue-100 text-blue-800',
+      defaultConfig: {
+        title: 'New Task',
+        description: '',
+        assignee: '',
+        due_date: '{{date.add(1, "days")}}',
+        priority: 'medium'
+      }
+    },
+    { 
+      type: 'send_email', 
+      name: 'Send Email', 
+      icon: Mail, 
+      color: 'bg-green-100 text-green-800',
+      defaultConfig: {
+        to: '{{customer.email}}',
+        subject: 'Notification from Limn Systems',
+        template: 'default',
+        data: {}
+      }
+    },
+    { 
+      type: 'notify_slack', 
+      name: 'Slack Notification', 
+      icon: MessageSquare, 
+      color: 'bg-purple-100 text-purple-800',
+      defaultConfig: {
+        channel: '#general',
+        message: 'New notification from workflow'
+      }
+    },
+    { 
+      type: 'update_record', 
+      name: 'Update Record', 
+      icon: Database, 
+      color: 'bg-orange-100 text-orange-800',
+      defaultConfig: {
+        table: 'orders',
+        field: 'status',
+        value: 'updated'
+      }
+    },
+    { 
+      type: 'send_sms', 
+      name: 'Send SMS', 
+      icon: MessageSquare, 
+      color: 'bg-pink-100 text-pink-800',
+      defaultConfig: {
+        to: '{{customer.phone}}',
+        message: 'Update from Limn Systems'
+      }
+    }
+  ]
+
+  const addAction = (actionType: ActionType) => {
+    const newAction: WorkflowAction = {
+      id: Date.now().toString(),
+      type: actionType.type as 'create_task' | 'send_email' | 'notify_slack' | 'update_record' | 'send_sms',
+      name: actionType.name,
+      config: actionType.defaultConfig,
+      required: false
+    }
+    setActions([...actions, newAction])
+  }
+
+  const removeAction = (actionId: string) => {
+    setActions(actions.filter(a => a.id !== actionId))
+  }
+
+  const updateAction = (actionId: string, field: string, value: unknown) => {
+    setActions(actions.map(action => 
+      action.id === actionId 
+        ? { ...action, [field]: value }
+        : action
+    ))
+  }
+
+  const updateActionConfig = (actionId: string, configField: string, value: unknown) => {
+    setActions(actions.map(action => 
+      action.id === actionId 
+        ? { ...action, config: { ...(action.config as Record<string, unknown> || {}), [configField]: value } }
+        : action
+    ))
+  }
+
+  const addCondition = () => {
+    const newCondition: WorkflowCondition = {
+      field: 'order.total',
+      operator: '>',
+      value: 1000
+    }
+    setConditions([...conditions, newCondition])
+  }
+
+  const removeCondition = (index: number) => {
+    setConditions(conditions.filter((_, i) => i !== index))
+  }
+
+  const updateCondition = (index: number, field: keyof WorkflowCondition, value: unknown) => {
+    setConditions(conditions.map((condition, i) => 
+      i === index 
+        ? { ...condition, [field]: value }
+        : condition
+    ))
+  }
+
+  const saveWorkflow = async () => {
+    setSaving(true)
+    try {
+      const workflowData = {
+        name: workflowName,
+        description: workflowDescription,
+        trigger_type: triggerType,
+        trigger_config: {},
+        actions,
+        conditions: conditions.length > 0 ? conditions[0] : {},
+        enabled: true
+      }
+
+      const response = await fetch('/api/workflows', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(workflowData),
+      })
+
+      if (response.ok) {
+        router.push('/dashboard/workflows')
+      }
+    } catch (error) {
+      console.error('Failed to save workflow:', error)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const testWorkflow = async () => {
+    const testData = {
+      workflow_id: 'test',
+      trigger_data: {
+        order: { id: 'test-123', number: 'ORD-123', total: 5000 },
+        customer: { id: 'cust-1', name: 'Test Customer', email: 'test@example.com' }
+      },
+      test_mode: true
+    }
+
+    try {
+      const response = await fetch('/api/workflows/execute', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(testData),
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        console.log('Test result:', result)
+        alert('Test completed successfully!')
+      }
+    } catch (error) {
+      console.error('Test failed:', error)
+    }
+  }
+
+  const getActionIcon = (actionType: string) => {
+    const action = actionTypes.find(at => at.type === actionType)
+    return action ? action.icon : CheckCircle
+  }
+
+  const getActionColor = (actionType: string) => {
+    const action = actionTypes.find(at => at.type === actionType)
+    return action ? action.color : 'bg-gray-100 text-slate-900'
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-4">
+          <Button variant="outline" size="sm" onClick={() => router.back()}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold">Workflow Builder</h1>
+            <p className="text-slate-600">Create and configure automated workflows</p>
+          </div>
+        </div>
+        <div className="flex items-center space-x-2">
+          <Button variant="outline" onClick={testWorkflow}>
+            <Play className="w-4 h-4 mr-2" />
+            Test
+          </Button>
+          <Button onClick={saveWorkflow} disabled={saving}>
+            <Save className="w-4 h-4 mr-2" />
+            {saving ? 'Saving...' : 'Save'}
+          </Button>
+        </div>
+      </div>
+
+      {/* Workflow Configuration */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* Left Panel - Configuration */}
+        <div className="lg:col-span-1 space-y-6">
+          {/* Basic Info */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Workflow Info</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1">
+                  Name
+                </label>
+                <Input
+                  value={workflowName}
+                  onChange={(e) => setWorkflowName(e.target.value)}
+                  placeholder="Enter workflow name"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1">
+                  Description
+                </label>
+                <Textarea
+                  value={workflowDescription}
+                  onChange={(e) => setWorkflowDescription(e.target.value)}
+                  placeholder="Describe what this workflow does"
+                  rows={3}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Trigger Selection */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Trigger</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {triggerTypes.map((trigger) => (
+                  <div
+                    key={trigger.value}
+                    className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                      triggerType === trigger.value
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                    onClick={() => setTriggerType(trigger.value)}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <span className="text-xl">{trigger.icon}</span>
+                      <span className="font-medium">{trigger.label}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Available Actions */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Available Actions</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {actionTypes.map((actionType) => {
+                  const Icon = actionType.icon
+                  return (
+                    <div
+                      key={actionType.type}
+                      className="p-3 rounded-lg border border-gray-200 cursor-pointer hover:border-gray-300 transition-colors"
+                      onClick={() => addAction(actionType)}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <Icon className="w-4 h-4" />
+                        <span className="text-sm font-medium">{actionType.name}</span>
+                        <Plus className="w-3 h-3 ml-auto text-slate-500" />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Center Panel - Workflow Canvas */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Workflow Flow */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Workflow Flow</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {/* Trigger Node */}
+                <div className="flex items-center justify-center">
+                  <div className="bg-blue-100 border-2 border-blue-300 rounded-lg p-4 text-center">
+                    <div className="text-2xl mb-2">
+                      {triggerTypes.find(t => t.value === triggerType)?.icon}
+                    </div>
+                    <div className="font-medium">
+                      {triggerTypes.find(t => t.value === triggerType)?.label}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Conditions */}
+                {conditions.length > 0 && (
+                  <>
+                    <div className="flex justify-center">
+                      <div className="w-0.5 h-8 bg-gray-300"></div>
+                    </div>
+                    <div className="flex items-center justify-center">
+                      <div className="bg-yellow-100 border-2 border-yellow-300 rounded-lg p-4 text-center">
+                        <GitBranch className="w-6 h-6 mx-auto mb-2" />
+                        <div className="font-medium">Condition</div>
+                        <div className="text-sm text-slate-600">
+                          {conditions[0]?.field} {conditions[0]?.operator} {String(conditions[0]?.value)}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Actions */}
+                {actions.map((action) => {
+                  const Icon = getActionIcon(action.type)
+                  return (
+                    <div key={action.id}>
+                      <div className="flex justify-center">
+                        <div className="w-0.5 h-8 bg-gray-300"></div>
+                      </div>
+                      <div className="flex items-center justify-center">
+                        <div className="bg-green-100 border-2 border-green-300 rounded-lg p-4 text-center relative group">
+                          <Icon className="w-6 h-6 mx-auto mb-2" />
+                          <div className="font-medium">{action.name}</div>
+                          <div className="text-sm text-slate-600">
+                            {safeFormatString(action.type, 'unknown action')}
+                          </div>
+                          {action.required && (
+                            <Badge className="absolute -top-2 -right-2 bg-red-500">Required</Badge>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {/* End Node */}
+                <div className="flex justify-center">
+                  <div className="w-0.5 h-8 bg-gray-300"></div>
+                </div>
+                <div className="flex items-center justify-center">
+                  <div className="bg-gray-100 border-2 border-gray-300 rounded-lg p-4 text-center">
+                    <CheckCircle className="w-6 h-6 mx-auto mb-2" />
+                    <div className="font-medium">Complete</div>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Right Panel - Action Configuration */}
+        <div className="lg:col-span-1 space-y-6">
+          {/* Conditions */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                Conditions
+                <Button size="sm" variant="outline" onClick={addCondition}>
+                  <Plus className="w-3 h-3" />
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {conditions.length === 0 ? (
+                <p className="text-sm text-slate-500 text-center py-4">
+                  No conditions set
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {conditions.map((condition, index) => (
+                    <div key={index} className="p-3 border rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">Condition {index + 1}</span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => removeCondition(index)}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
+                      <div className="space-y-2">
+                        <Input
+                          placeholder="Field (e.g., order.total)"
+                          value={condition.field}
+                          onChange={(e) => updateCondition(index, 'field', e.target.value)}
+                        />
+                        <Select
+                          value={condition.operator}
+                          onValueChange={(value) => updateCondition(index, 'operator', value as unknown)}
+                        >
+                          <SelectTrigger className="w-full p-2 border rounded">
+                            <SelectValue placeholder="Select operator" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="=">=</SelectItem>
+                            <SelectItem value="!=">!=</SelectItem>
+                            <SelectItem value=">">&gt;</SelectItem>
+                            <SelectItem value="<">&lt;</SelectItem>
+                            <SelectItem value="contains">contains</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          placeholder="Value"
+                          value={String(condition.value || '')}
+                          onChange={(e) => updateCondition(index, 'value', e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Actions Configuration */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Actions ({actions.length})</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {actions.length === 0 ? (
+                <p className="text-sm text-slate-500 text-center py-4">
+                  No actions configured
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {actions.map((action) => (
+                    <div key={action.id} className="p-3 border rounded-lg space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Badge className={getActionColor(action.type)}>
+                          {action.name}
+                        </Badge>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => removeAction(action.id)}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <div>
+                          <label className="text-xs font-medium text-slate-500">Required</label>
+                          <input
+                            type="checkbox"
+                            checked={action.required}
+                            onChange={(e) => updateAction(action.id, 'required', e.target.checked)}
+                            className="ml-2"
+                          />
+                        </div>
+                        
+                        {/* Action-specific configuration */}
+                        {action.type === 'create_task' && (
+                          <>
+                            <Input
+                              placeholder="Task title"
+                              value={String(safeGet(action.config, ['title']) || '')}
+                              onChange={(e) => updateActionConfig(action.id, 'title', e.target.value)}
+                            />
+                            <Input
+                              placeholder="Assignee"
+                              value={String(safeGet(action.config, ['assignee']) || '')}
+                              onChange={(e) => updateActionConfig(action.id, 'assignee', e.target.value)}
+                            />
+                          </>
+                        )}
+                        
+                        {action.type === 'send_email' && (
+                          <>
+                            <Input
+                              placeholder="To email"
+                              value={String(safeGet(action.config, ['to']) || '')}
+                              onChange={(e) => updateActionConfig(action.id, 'to', e.target.value)}
+                            />
+                            <Input
+                              placeholder="Subject"
+                              value={String(safeGet(action.config, ['subject']) || '')}
+                              onChange={(e) => updateActionConfig(action.id, 'subject', e.target.value)}
+                            />
+                          </>
+                        )}
+                        
+                        {action.type === 'notify_slack' && (
+                          <>
+                            <Input
+                              placeholder="Channel (e.g., #general)"
+                              value={String(safeGet(action.config, ['channel']) || '')}
+                              onChange={(e) => updateActionConfig(action.id, 'channel', e.target.value)}
+                            />
+                            <Textarea
+                              placeholder="Message"
+                              value={String(safeGet(action.config, ['message']) || '')}
+                              onChange={(e) => updateActionConfig(action.id, 'message', e.target.value)}
+                              rows={2}
+                            />
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  )
+}

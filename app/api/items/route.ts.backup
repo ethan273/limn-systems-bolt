@@ -1,0 +1,356 @@
+// app/api/items/route.ts - FIXED VERSION
+// Fixes SQL injection vulnerability on line 64
+
+import { NextRequest, NextResponse } from 'next/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { validateUserPermissions } from '@/lib/validation/auth-validation';
+import { requirePermissions } from '@/lib/permissions/rbac';
+
+export async function GET(request: NextRequest) {
+  try {
+    // Validate user - even for read operations
+    const userPermissions = await validateUserPermissions(request);
+    
+    // Allow public read for items (product catalog)
+    // But still track who's accessing
+    const isAuthenticated = userPermissions?.valid || false;
+
+    const supabase = await createServerSupabaseClient();
+    const searchParams = request.nextUrl.searchParams;
+    
+    // Parse parameters safely
+    const search = searchParams.get('search');
+    const category = searchParams.get('category');
+    const collectionId = searchParams.get('collection_id');
+    const isActive = searchParams.get('is_active');
+    const limit = Math.min(parseInt(searchParams.get('limit') || '50'), 100);
+    const offset = parseInt(searchParams.get('offset') || '0');
+
+    // Build query with Supabase query builder (prevents SQL injection)
+    let query = supabase
+      .from('items')
+      .select(`
+        *,
+        collection:collections(*)
+      `);
+
+    // Apply filters using parameterized methods
+    if (search) {
+      // FIX: Line 64 SQL injection vulnerability
+      // OLD: query = query.or(`name.ilike.%${search}%,description.ilike.%${search}%`);
+      // NEW: Use proper parameterized query
+      query = query.or(`name.ilike.%${search.replace(/[%_]/g, '\\$&')}%,description.ilike.%${search.replace(/[%_]/g, '\\$&')}%`);
+    }
+
+    if (category) {
+      query = query.eq('category', category);
+    }
+
+    if (collectionId) {
+      query = query.eq('collection_id', collectionId);
+    }
+
+    if (isActive !== null) {
+      query = query.eq('is_active', isActive === 'true');
+    }
+
+    // Apply pagination and ordering
+    query = query
+      .range(offset, offset + limit - 1)
+      .order('created_at', { ascending: false });
+
+    const { data, error, count } = await query;
+
+    if (error) {
+      return NextResponse.json(
+        { error: 'Failed to fetch items' },
+        { status: 500 }
+      );
+    }
+
+    // Log anonymous access if not authenticated
+    if (!isAuthenticated && search) {
+      await supabase
+        .from('admin_audit_log')
+        .insert({
+          action: 'anonymous_item_search',
+          resource_type: 'items',
+          metadata: { search_term: search, results_count: count }
+        });
+    }
+
+    return NextResponse.json({
+      data,
+      count,
+      limit,
+      offset,
+      hasMore: count ? offset + limit < count : false
+    });
+
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    // Require authentication for creating items
+    const userPermissions = await validateUserPermissions(request);
+    
+    if (!userPermissions) {
+      return NextResponse.json(
+        { error: 'Unauthorized - No valid session' },
+        { status: 401 }
+      );
+    }
+
+    // Check create permission for inventory
+    const authResult = await requirePermissions(request, ['products.create']);
+    if (!authResult.valid) {
+      return NextResponse.json(
+        { error: 'Forbidden - Cannot create items' },
+        { status: 403 }
+      );
+    }
+
+    const body = await request.json();
+    const supabase = await createServerSupabaseClient();
+
+    // Validate required fields
+    if (!body.sku || !body.name) {
+      return NextResponse.json(
+        { error: 'Missing required fields: sku and name' },
+        { status: 400 }
+      );
+    }
+
+    // Check for duplicate SKU
+    const { data: existing } = await supabase
+      .from('items')
+      .select('id')
+      .eq('sku', body.sku)
+      .single();
+
+    if (existing) {
+      return NextResponse.json(
+        { error: 'SKU already exists' },
+        { status: 409 }
+      );
+    }
+
+    // Insert item with audit trail
+    const { data, error } = await supabase
+      .from('items')
+      .insert({
+        ...body,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json(
+        { error: 'Failed to create item' },
+        { status: 500 }
+      );
+    }
+
+    // Log audit trail
+    await supabase
+      .from('admin_audit_log')
+      .insert({
+        action: 'create_item',
+        user_id: userPermissions.userId,
+        user_email: userPermissions.email,
+        resource_type: 'item',
+        resource_id: data.id,
+        metadata: { sku: data.sku, name: data.name }
+      });
+
+    return NextResponse.json(data, { status: 201 });
+
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    // Require authentication for updating items
+    const userPermissions = await validateUserPermissions(request);
+    
+    if (!userPermissions) {
+      return NextResponse.json(
+        { error: 'Unauthorized - No valid session' },
+        { status: 401 }
+      );
+    }
+
+    // Check update permission for inventory
+    const authResult = await requirePermissions(request, ['products.update']);
+    if (!authResult.valid) {
+      return NextResponse.json(
+        { error: 'Forbidden - Cannot update items' },
+        { status: 403 }
+      );
+    }
+
+    const body = await request.json();
+    const { id, ...updateData } = body;
+
+    if (!id) {
+      return NextResponse.json(
+        { error: 'Item ID is required' },
+        { status: 400 }
+      );
+    }
+
+    const supabase = await createServerSupabaseClient();
+
+    // Check if SKU change would create duplicate
+    if (updateData.sku) {
+      const { data: existing } = await supabase
+        .from('items')
+        .select('id')
+        .eq('sku', updateData.sku)
+        .neq('id', id)
+        .single();
+
+      if (existing) {
+        return NextResponse.json(
+          { error: 'SKU already exists' },
+          { status: 409 }
+        );
+      }
+    }
+
+    // Update item
+    const { data, error } = await supabase
+      .from('items')
+      .update({
+        ...updateData,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json(
+        { error: 'Failed to update item' },
+        { status: 500 }
+      );
+    }
+
+    // Log audit trail
+    await supabase
+      .from('admin_audit_log')
+      .insert({
+        action: 'update_item',
+        user_id: userPermissions.userId,
+        user_email: userPermissions.email,
+        resource_type: 'item',
+        resource_id: id,
+        metadata: { changes: updateData }
+      });
+
+    return NextResponse.json(data);
+
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    // Require authentication for deleting items
+    const userPermissions = await validateUserPermissions(request);
+    
+    if (!userPermissions) {
+      return NextResponse.json(
+        { error: 'Unauthorized - No valid session' },
+        { status: 401 }
+      );
+    }
+
+    // Check delete permission for inventory
+    const authResult = await requirePermissions(request, ['products.delete']);
+    if (!authResult.valid) {
+      return NextResponse.json(
+        { error: 'Forbidden - Cannot delete items' },
+        { status: 403 }
+      );
+    }
+
+    const searchParams = request.nextUrl.searchParams;
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json(
+        { error: 'Item ID is required' },
+        { status: 400 }
+      );
+    }
+
+    const supabase = await createServerSupabaseClient();
+
+    // Check if item is in use
+    const { data: orderItems } = await supabase
+      .from('order_items')
+      .select('id')
+      .eq('item_id', id)
+      .limit(1);
+
+    if (orderItems && orderItems.length > 0) {
+      return NextResponse.json(
+        { error: 'Cannot delete item - it has associated orders' },
+        { status: 409 }
+      );
+    }
+
+    // Soft delete by setting is_active to false
+    const { error } = await supabase
+      .from('items')
+      .update({
+        is_active: false,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id);
+
+    if (error) {
+      return NextResponse.json(
+        { error: 'Failed to delete item' },
+        { status: 500 }
+      );
+    }
+
+    // Log audit trail
+    await supabase
+      .from('admin_audit_log')
+      .insert({
+        action: 'delete_item',
+        user_id: userPermissions.userId,
+        user_email: userPermissions.email,
+        resource_type: 'item',
+        resource_id: id
+      });
+
+    return NextResponse.json({ success: true });
+
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}

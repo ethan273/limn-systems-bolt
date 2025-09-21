@@ -1,0 +1,637 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Button } from '@/components/ui/button'
+import { PageHeader } from '@/components/ui/page-header'
+import { LoadingSpinner } from '@/components/ui/loading-spinner'
+import { Alert } from '@/components/ui/alert'
+import { EmptyState } from '@/components/ui/empty-state'
+import { StatCard } from '@/components/ui/stat-card'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
+import { AlertCircle, CheckCircle, Users, TrendingUp, DollarSign, Target } from 'lucide-react'
+import { safeFormatString } from '@/lib/utils/string-helpers'
+import CreateLeadModal from '@/components/leads/CreateLeadModal'
+
+interface Lead {
+  id: string
+  contact_id: string
+  contact_name: string
+  contact_email: string
+  company: string
+  title: string
+  status: 'new' | 'contacted' | 'qualified' | 'proposal' | 'negotiation' | 'won' | 'lost'
+  lead_source: 'website' | 'referral' | 'cold_outreach' | 'trade_show' | 'social_media' | 'advertising'
+  estimated_value: number
+  probability: number
+  expected_close_date?: string
+  assigned_to: string
+  stage: 'awareness' | 'interest' | 'consideration' | 'intent' | 'evaluation' | 'purchase'
+  project_type: 'furniture' | 'decking' | 'cladding' | 'fixtures' | 'custom_millwork' | 'mixed'
+  urgency: 'low' | 'medium' | 'high' | 'urgent'
+  budget_confirmed: boolean
+  decision_maker_identified: boolean
+  timeline_confirmed: boolean
+  created_at: string
+  updated_at?: string
+  last_contact_date?: string
+  next_follow_up?: string
+  notes?: string
+  lost_reason?: string
+}
+
+
+export default function LeadsPage() {
+  const router = useRouter()
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  
+  // Filters and view
+  const [activeView, setActiveView] = useState<'kanban' | 'table'>('table')
+  const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [filterAssignee, setFilterAssignee] = useState<string>('all')
+  const [filterProjectType, setFilterProjectType] = useState<string>('all')
+  const [searchTerm, setSearchTerm] = useState('')
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [createLoading, setCreateLoading] = useState(false)
+
+  const fetchLeads = async () => {
+    try {
+      setLoading(true)
+      
+      // Real API call to leads endpoint
+      const response = await fetch('/api/leads')
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const data = await response.json()
+      
+      if (data.success && data.data) {
+        // Transform API data to match Lead interface - using REAL API response
+        const transformedLeads: Lead[] = (data.data || []).map((lead: unknown) => {
+          const apiLead = lead as {
+            id: string
+            name: string  
+            company: string
+            email: string
+            phone?: string
+            status: string
+            source: string
+            value: number
+            assigned_to: string
+            created_at: string
+            last_contact?: string
+            next_followup?: string
+            notes?: string
+          }
+          
+          return {
+            id: apiLead.id,
+            contact_id: apiLead.id, // Use same ID for contact_id
+            contact_name: apiLead.name,
+            contact_email: apiLead.email,
+            company: apiLead.company,
+            title: '', // API doesn't provide title, could be expanded later
+            status: apiLead.status as 'new' | 'contacted' | 'qualified' | 'proposal' | 'negotiation' | 'won' | 'lost',
+            lead_source: apiLead.source as 'website' | 'referral' | 'cold_outreach' | 'trade_show' | 'social_media' | 'advertising',
+            estimated_value: apiLead.value || 0,
+            probability: apiLead.status === 'won' ? 100 : apiLead.status === 'lost' ? 0 : 50, // Basic probability mapping
+            expected_close_date: apiLead.next_followup,
+            assigned_to: apiLead.assigned_to,
+            stage: 'interest' as const, // Default stage, could be enhanced later
+            project_type: 'mixed' as const, // Default project type, could be enhanced later  
+            urgency: 'medium' as const, // Default urgency, could be enhanced later
+            budget_confirmed: false, // Default, could be enhanced later
+            decision_maker_identified: false, // Default, could be enhanced later
+            timeline_confirmed: false, // Default, could be enhanced later
+            created_at: apiLead.created_at,
+            last_contact_date: apiLead.last_contact,
+            next_follow_up: apiLead.next_followup,
+            notes: apiLead.notes
+          }
+        })
+        
+        setLeads(transformedLeads)
+        setError('')
+        console.log('Leads: Successfully loaded', transformedLeads.length, 'leads from API')
+      } else {
+        throw new Error('Invalid API response format')
+      }
+      
+    } catch (err) {
+      setError('Failed to load leads')
+      console.error('Leads: Error loading data:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchLeads()
+  }, [])
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'new': return 'bg-stone-100 text-stone-700'
+      case 'contacted': return 'bg-blue-100 text-blue-700'
+      case 'qualified': return 'bg-amber-100 text-amber-700'
+      case 'proposal': return 'bg-purple-100 text-purple-700'
+      case 'negotiation': return 'bg-orange-100 text-orange-700'
+      case 'won': return 'bg-primary/10 text-primary'
+      case 'lost': return 'bg-red-100 text-red-700'
+      default: return 'bg-stone-100 text-stone-700'
+    }
+  }
+
+  const getUrgencyColor = (urgency: string) => {
+    switch (urgency) {
+      case 'low': return 'text-slate-500'
+      case 'medium': return 'text-blue-500'
+      case 'high': return 'text-amber-500'
+      case 'urgent': return 'text-red-500'
+      default: return 'text-slate-500'
+    }
+  }
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0
+    }).format(amount)
+  }
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    })
+  }
+
+  const convertToClient = async (lead: Lead) => {
+    setActionLoading(lead.id)
+    try {
+      // In production, this would make an API call to:
+      // 1. Create a new client record with lead information
+      // 2. Update lead status to 'won' and add client_id reference
+      
+      // Client data would be used for API call
+      console.log('Converting lead to client with data:', {
+        lead_id: lead.id,
+        company_name: lead.company,
+        primary_contact_name: lead.contact_name
+      })
+      
+      const clientData = {
+        lead_id: lead.id,
+        company_name: lead.company,
+        primary_contact_name: lead.contact_name,
+        primary_contact_email: lead.contact_email,
+        primary_contact_title: lead.title,
+        status: 'active',
+        type: 'commercial', // Could be derived from project_type
+        source: lead.lead_source,
+        estimated_annual_value: lead.estimated_value,
+        industry: 'general', // Could be expanded
+        billing_address: {}, // Would need to be collected
+        shipping_address: {}, // Would need to be collected
+        payment_terms: 'net_30', // Default
+        notes: `Converted from lead. Original notes: ${lead.notes || 'None'}`,
+        assigned_account_manager: lead.assigned_to,
+        created_at: new Date().toISOString()
+      }
+      
+      // TODO: Implement real API call to create client
+      console.log('Would create client with data:', clientData)
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      setSuccess(`Successfully converted ${lead.contact_name} (${lead.company}) to a client!`)
+      
+      // In a real app, you might redirect to the clients page or update the lead status
+      setTimeout(() => {
+        window.location.href = '/dashboard/clients'
+      }, 2000)
+      
+    } catch (error) {
+      console.error('Error converting to client:', error)
+      setError('Failed to convert lead to client. Please try again.')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const createLead = async (leadData: Partial<Lead>) => {
+    setCreateLoading(true)
+    try {
+      // Map the leadData fields to what the API expects
+      const apiData = {
+        name: leadData.contact_name,
+        company: leadData.company,
+        email: leadData.contact_email,
+        phone: '', // Add phone field if needed
+        status: leadData.status || 'new',
+        source: leadData.lead_source || 'manual',
+        value: leadData.estimated_value || 0,
+        assigned_to: leadData.assigned_to || 'ethan@limn.us.com',
+        notes: leadData.notes || '',
+        next_followup: leadData.next_follow_up || new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
+      }
+
+      const response = await fetch('/api/leads', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(apiData)
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to create lead')
+      }
+
+      const result = await response.json()
+      
+      if (result.success) {
+        setSuccess('Lead created successfully!')
+        setShowCreateModal(false)
+        await fetchLeads() // Refresh the leads list
+      } else {
+        throw new Error(result.error || 'Failed to create lead')
+      }
+    } catch (error) {
+      console.error('Error creating lead:', error)
+      setError(error instanceof Error ? error.message : 'Failed to create lead. Please try again.')
+    } finally {
+      setCreateLoading(false)
+    }
+  }
+
+  const filteredLeads = leads.filter(lead => {
+    const matchesStatus = filterStatus === 'all' || lead.status === filterStatus
+    const matchesAssignee = filterAssignee === 'all' || lead.assigned_to === filterAssignee
+    const matchesProjectType = filterProjectType === 'all' || lead.project_type === filterProjectType
+    const matchesSearch = searchTerm === '' || 
+      (lead.contact_name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (lead.company || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      lead.notes?.toLowerCase().includes(searchTerm.toLowerCase())
+    
+    return matchesStatus && matchesAssignee && matchesProjectType && matchesSearch
+  })
+
+  const getLeadsByStatus = () => {
+    const statuses = ['new', 'contacted', 'qualified', 'proposal', 'negotiation', 'won', 'lost']
+    return statuses.reduce((acc, status) => {
+      acc[status] = filteredLeads.filter(lead => lead.status === status)
+      return acc
+    }, {} as Record<string, Lead[]>)
+  }
+
+  const leadsByStatus = getLeadsByStatus()
+  const uniqueAssignees = Array.from(new Set(leads.map(l => l.assigned_to))).sort()
+
+  const pipelineMetrics = {
+    totalValue: leads.reduce((sum, lead) => sum + lead.estimated_value, 0),
+    weightedValue: leads.reduce((sum, lead) => sum + (lead.estimated_value * (lead.probability / 100)), 0),
+    activePipeline: leads.filter(l => !['won', 'lost'].includes(l.status)).length,
+    conversionRate: leads.length > 0 ? (leads.filter(l => l.status === 'won').length / leads.length) * 100 : 0
+  }
+
+  return (
+    <div className="space-y-8">
+      <PageHeader 
+        title="Leads"
+        description="Manage your sales pipeline and lead conversion"
+        actions={
+          <div className="flex space-x-2">
+            <Button onClick={fetchLeads} disabled={loading} variant="outline">
+              {loading ? 'Refreshing...' : 'Refresh'}
+            </Button>
+            <Button onClick={() => setShowCreateModal(true)}>
+              New Lead
+            </Button>
+          </div>
+        }
+      />
+
+      {error && (
+        <Alert variant="error">
+          <AlertCircle className="h-4 w-4" />
+          <span>{error}</span>
+        </Alert>
+      )}
+
+      {success && (
+        <Alert variant="success">
+          <CheckCircle className="h-4 w-4" />
+          <span>{success}</span>
+        </Alert>
+      )}
+
+      {/* Pipeline Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <StatCard 
+          title="Pipeline Value" 
+          value={formatCurrency(pipelineMetrics.totalValue)}
+          icon={DollarSign}
+          iconColor="text-green-600"
+          iconBgColor="bg-green-50"
+        />
+        <StatCard 
+          title="Weighted Value" 
+          value={formatCurrency(pipelineMetrics.weightedValue)}
+          icon={TrendingUp}
+          iconColor="text-blue-600"
+          iconBgColor="bg-blue-50"
+        />
+        <StatCard 
+          title="Active Leads" 
+          value={pipelineMetrics.activePipeline}
+          icon={Users}
+          iconColor="text-purple-600"
+          iconBgColor="bg-purple-50"
+        />
+        <StatCard 
+          title="Conversion Rate" 
+          value={`${pipelineMetrics.conversionRate.toFixed(1)}%`}
+          icon={Target}
+          iconColor="text-orange-600"
+          iconBgColor="bg-orange-50"
+        />
+      </div>
+
+      {/* View Toggle and Filters */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex space-x-2">
+              <Button
+                variant={activeView === 'table' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setActiveView('table')}
+              >
+                List View
+              </Button>
+              <Button
+                variant={activeView === 'kanban' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setActiveView('kanban')}
+              >
+                Kanban View
+              </Button>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="filter-status">Filter by Status</Label>
+              <Select value={filterStatus} onValueChange={setFilterStatus}>
+                <SelectTrigger id="filter-status">
+                  <SelectValue placeholder="All Statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="new">New</SelectItem>
+                  <SelectItem value="contacted">Contacted</SelectItem>
+                  <SelectItem value="qualified">Qualified</SelectItem>
+                  <SelectItem value="proposal">Proposal</SelectItem>
+                  <SelectItem value="negotiation">Negotiation</SelectItem>
+                  <SelectItem value="won">Won</SelectItem>
+                  <SelectItem value="lost">Lost</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="filter-assignee">Filter by Assignee</Label>
+              <Select value={filterAssignee} onValueChange={setFilterAssignee}>
+                <SelectTrigger id="filter-assignee">
+                  <SelectValue placeholder="All Assignees" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Assignees</SelectItem>
+                  {uniqueAssignees.map((assignee) => (
+                    <SelectItem key={assignee} value={assignee}>{assignee}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="filter-project-type">Filter by Project Type</Label>
+              <Select value={filterProjectType} onValueChange={setFilterProjectType}>
+                <SelectTrigger id="filter-project-type">
+                  <SelectValue placeholder="All Types" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="furniture">Furniture</SelectItem>
+                  <SelectItem value="decking">Decking</SelectItem>
+                  <SelectItem value="cladding">Cladding</SelectItem>
+                  <SelectItem value="fixtures">Fixtures</SelectItem>
+                  <SelectItem value="custom_millwork">Custom Millwork</SelectItem>
+                  <SelectItem value="mixed">Mixed</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="search-leads">Search Leads</Label>
+              <Input
+                id="search-leads"
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search name, company, notes..."
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Kanban View */}
+      {activeView === 'kanban' && (
+        <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-7 gap-4">
+          {Object.entries(leadsByStatus).map(([status, statusLeads]) => (
+            <Card key={status}>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium capitalize flex items-center justify-between">
+                  <span>{safeFormatString(status, 'unknown')}</span>
+                  <span className="text-xs bg-stone-100 text-stone-600 px-2 py-1 rounded">
+                    {statusLeads.length}
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {statusLeads.map((lead) => (
+                    <div key={lead.id} className="p-3 border border-stone-200 rounded-md bg-white hover:shadow-sm transition-shadow cursor-pointer">
+                      <div className="font-medium text-sm text-slate-900 mb-1">{lead.contact_name}</div>
+                      <div className="text-xs text-slate-600 mb-2">{lead.company}</div>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="font-medium text-sm text-primary">
+                          {formatCurrency(lead.estimated_value)}
+                        </div>
+                        <div className={`text-xs ${getUrgencyColor(lead.urgency)}`}>
+                          {lead.urgency}
+                        </div>
+                      </div>
+                      <div className="text-xs text-slate-600">
+                        {safeFormatString(lead.project_type, 'unknown')} • {lead.probability}%
+                      </div>
+                      {lead.next_follow_up && (
+                        <div className="text-xs text-amber-600 mt-1">
+                          Follow-up: {formatDate(lead.next_follow_up)}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  
+                  {statusLeads.length === 0 && (
+                    <div className="text-center py-4 text-slate-600 text-sm">
+                      No leads in this stage
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Table View */}
+      {activeView === 'table' && (
+        <Card>
+          <CardHeader>
+            <CardTitle>All Leads ({filteredLeads.length})</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <LoadingSpinner size="lg" text="Loading leads..." className="py-32" />
+            ) : filteredLeads.length === 0 ? (
+              <EmptyState 
+                icon={Users}
+                title="No leads found"
+                description="Get started by creating your first lead or adjust your filters to see existing leads."
+                actionLabel="Create First Lead"
+                onAction={() => console.log('Create lead')}
+              />
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Lead</TableHead>
+                    <TableHead>Company</TableHead>
+                    <TableHead>Value</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Project Type</TableHead>
+                    <TableHead>Probability</TableHead>
+                    <TableHead>Assigned To</TableHead>
+                    <TableHead>Next Follow-up</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredLeads.map((lead, index) => (
+                    <TableRow key={lead.id || `lead-${index}`}>
+                      <TableCell>
+                        <div>
+                          <div className="font-medium text-slate-900">{lead.contact_name}</div>
+                          <div className="text-sm text-slate-600">{lead.title}</div>
+                          <div className="flex items-center space-x-2 mt-1">
+                            <span className={`text-xs ${getUrgencyColor(lead.urgency)}`}>
+                              {(lead.urgency || "").toUpperCase()}
+                            </span>
+                            {lead.budget_confirmed && (
+                              <span className="text-xs bg-emerald-100 text-emerald-600 px-1 rounded">$✓</span>
+                            )}
+                            {lead.decision_maker_identified && (
+                              <span className="text-xs bg-blue-100 text-blue-600 px-1 rounded">DM✓</span>
+                            )}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="font-medium">{lead.company}</div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="font-medium text-primary">{formatCurrency(lead.estimated_value)}</div>
+                      </TableCell>
+                      <TableCell>
+                        <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs capitalize ${getStatusColor(lead.status)}`}>
+                          {lead.status}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm capitalize">
+                          {safeFormatString(lead.project_type, 'unknown')}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center space-x-2">
+                          <div className="w-16 bg-stone-200 rounded-full h-2">
+                            <div 
+                              className="bg-primary h-2 rounded-full transition-all duration-300"
+                              style={{ width: `${lead.probability}%` }}
+                            ></div>
+                          </div>
+                          <span className="text-sm">{lead.probability}%</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm">{lead.assigned_to}</div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm">
+                          {lead.next_follow_up ? formatDate(lead.next_follow_up) : '—'}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex space-x-1">
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            onClick={() => router.push(`/dashboard/leads/${lead.id}/edit`)}
+                          >
+                            Edit
+                          </Button>
+                          {(lead.status === 'won' || lead.status === 'qualified' || lead.status === 'proposal' || lead.status === 'negotiation') && (
+                            <Button 
+                              size="sm" 
+                              variant="outline"
+                              onClick={() => convertToClient(lead)}
+                              disabled={actionLoading === lead.id}
+                            >
+                              {actionLoading === lead.id ? 'Converting...' : '→ Client'}
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
+      
+      {/* Create Lead Modal */}
+      <CreateLeadModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onSubmit={createLead}
+        loading={createLoading}
+      />
+    </div>
+  )
+}

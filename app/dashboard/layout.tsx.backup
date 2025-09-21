@@ -1,0 +1,450 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+'use client'
+
+import { useEffect, useState, useCallback } from 'react'
+import { useRouter, usePathname } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
+import { Button } from '@/components/ui/button'
+import { Logo } from '@/components/ui/logo'
+import { usePermissions } from '@/hooks/usePermissions'
+import { 
+  LayoutDashboard, 
+  CheckSquare, 
+  Package, 
+  Layers, 
+  Box, 
+  Users, 
+  UserPlus, 
+  Building2, 
+  FolderOpen, 
+  ShoppingCart, 
+  Factory, 
+  Truck, 
+  BarChart3, 
+  Settings, 
+  Database,
+  GitBranch,
+  DollarSign,
+  Palette,
+  FileText,
+  TrendingUp,
+  FileSignature,
+  Receipt,
+  Target,
+  Cog,
+  Activity,
+  Heart,
+  Zap,
+  Menu,
+  X,
+  ClipboardList,
+  Hammer,
+  PenTool,
+  Calendar,
+  CreditCard,
+  FileCheck,
+  Ship,
+  Timer,
+  Paintbrush,
+  ClipboardCheck
+} from 'lucide-react'
+import { CollapsibleNavigation } from '@/components/ui/collapsible-navigation'
+import { ErrorBoundary } from '@/components/ui/error-boundary'
+import { NotificationCenter } from '@/components/portal/notification-center'
+import { GlobalSearch } from '@/components/ui/global-search'
+import { EnhancedNotificationCenter } from '@/components/ui/enhanced-notifications'
+import { hasProperty, safeGet } from '@/lib/utils/bulk-type-fixes'
+
+interface LayoutProps {
+  children: React.ReactNode
+}
+
+export default function DashboardLayout({ children }: LayoutProps) {
+  const [user, setUser] = useState<unknown>(null)
+  const [loading, setLoading] = useState(true)
+  const [signingOut, setSigningOut] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const router = useRouter()
+  const pathname = usePathname()
+  const { loading: permissionsLoading } = usePermissions()
+
+  // Safe user property accessors
+  const getUserId = (): string => {
+    return safeGet<string>(user, ['id']) || ''
+  }
+
+  const getUserEmail = (): string => {
+    return safeGet<string>(user, ['email']) || ''
+  }
+
+  const getUserEmailInitial = (): string => {
+    const email = getUserEmail()
+    return email ? email[0]?.toUpperCase() || '' : ''
+  }
+
+  const checkAuth = useCallback(async () => {
+    try {
+      const supabase = createClient()
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      console.log('Dashboard layout auth check:', {
+        hasSession: !!session,
+        userId: session?.user?.id,
+        userEmail: session?.user?.email,
+        path: pathname
+      })
+      
+      if (session?.user) {
+        setUser(session.user)
+        console.log('Dashboard auth successful for:', session.user?.email)
+      } else {
+        console.log('No session found, redirecting to /auth')
+        router.push('/auth')
+        return
+      }
+    } catch (error) {
+      console.error('Dashboard auth error:', error)
+      router.push('/auth')
+      return
+    } finally {
+      setLoading(false)
+    }
+  }, [router, pathname])
+
+  useEffect(() => {
+    checkAuth()
+  }, [checkAuth])
+
+  const handleSignOut = async () => {
+    try {
+      setSigningOut(true)
+      const supabase = createClient()
+      
+      // Clear the session
+      await supabase.auth.signOut()
+      
+      // Force a hard redirect to auth page to ensure clean state
+      window.location.href = '/auth'
+    } catch (error) {
+      console.error('Sign out error:', error)
+      // Fallback to router push if window.location fails
+      router.push('/auth')
+    } finally {
+      setSigningOut(false)
+    }
+  }
+
+  if (loading || permissionsLoading) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center font-roboto">
+        <div className="text-center">
+          <div className="mb-4 flex justify-center">
+            <Logo width={140} height={60} />
+          </div>
+          <div className="text-slate-600">Loading...</div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return null
+  }
+
+  // Base navigation items (always visible)
+  const baseNavigation = [
+    { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+    { name: 'Pipeline', href: '/dashboard/pipeline', icon: GitBranch },
+    { name: 'Activity', href: '/dashboard/activity', icon: Activity },
+  ]
+
+  // Navigation sections for collapsible menu
+  const navigationSections = [
+    {
+      title: 'Task Management',
+      items: [
+        { name: 'All Tasks', href: '/dashboard/tasks', icon: CheckSquare },
+        { name: 'My Tasks', href: '/dashboard/my-tasks', icon: ClipboardList },
+      ]
+    },
+    {
+      title: 'CRM & Sales',
+      items: [
+        { name: 'CRM Dashboard', href: '/dashboard/crm', icon: BarChart3 },
+        { name: 'Contacts', href: '/dashboard/contacts', icon: Users },
+        { name: 'Leads', href: '/dashboard/leads', icon: UserPlus },
+        { name: 'Clients', href: '/dashboard/clients', icon: Building2 },
+        { name: 'Projects', href: '/dashboard/projects', icon: FolderOpen },
+      ]
+    },
+    {
+      title: 'Product Management',
+      items: [
+        { name: 'Ordered Items', href: '/dashboard/products', icon: Package },
+        { name: 'Collections', href: '/dashboard/collections', icon: Layers },
+        { name: 'Materials', href: '/dashboard/materials', icon: Box },
+      ]
+    },
+    {
+      title: 'Catalog Items',
+      items: [
+        { name: 'Catalog Items', href: '/dashboard/items', icon: Box },
+        { name: 'Prototype Items', href: '/dashboard/prototype-items', icon: Package },
+        { name: 'Concept Items', href: '/dashboard/concept-items', icon: PenTool },
+      ]
+    },
+    {
+      title: 'Orders & Production',
+      items: [
+        { name: 'Orders', href: '/dashboard/orders', icon: ShoppingCart },
+        { name: 'Order Tracking', href: '/dashboard/order-tracking', icon: Package },
+        { name: 'Production', href: '/dashboard/production', icon: Settings },
+        { name: 'Production Tracking', href: '/dashboard/production-tracking', icon: Factory },
+        { name: 'Production Analytics', href: '/dashboard/production/analytics', icon: BarChart3 },
+        { name: 'Capacity Planning', href: '/dashboard/production/capacity', icon: Target },
+        { name: 'QC Tracking', href: '/dashboard/qc-tracking', icon: CheckSquare },
+      ]
+    },
+    {
+      title: 'Manufacturing & Tracking',
+      items: [
+        { name: 'Manufacturers', href: '/dashboard/manufacturers', icon: Building2 },
+        { name: 'Prototypes', href: '/dashboard/prototypes', icon: Hammer },
+        { name: 'Factory Reviews', href: '/dashboard/factory-reviews', icon: ClipboardCheck },
+        { name: 'Shop Drawings', href: '/dashboard/shop-drawings', icon: PenTool },
+        { name: 'Packing', href: '/dashboard/packing', icon: Package },
+        { name: 'Shipping', href: '/dashboard/shipping', icon: Truck },
+        { name: 'Shipping Management', href: '/dashboard/shipping-management', icon: Truck },
+        { name: 'Shipping Quotes', href: '/dashboard/shipping-quotes', icon: Ship },
+      ]
+    },
+    {
+      title: 'Design & Creative',
+      items: [
+        { name: 'Design Dashboard', href: '/dashboard/design', icon: LayoutDashboard },
+        { name: 'Designers', href: '/dashboard/designers', icon: Palette },
+        { name: 'Design Briefs', href: '/dashboard/design-briefs', icon: FileText },
+        { name: 'Design Projects', href: '/dashboard/design-projects', icon: FileText },
+        { name: 'Design Boards', href: '/dashboard/design-boards', icon: Paintbrush },
+      ]
+    },
+    {
+      title: 'Financial Management',
+      items: [
+        { name: 'Finance Dashboard', href: '/dashboard/finance', icon: DollarSign },
+        { name: 'Invoices', href: '/dashboard/invoices', icon: Receipt },
+        { name: 'Payments', href: '/dashboard/payments', icon: CreditCard },
+        { name: 'AR Aging', href: '/dashboard/ar-aging', icon: Timer },
+        { name: 'Budgets', href: '/dashboard/budgets', icon: Target },
+        { name: 'Budget Variance', href: '/dashboard/budget-variance', icon: BarChart3 },
+        { name: 'Contracts', href: '/dashboard/contracts', icon: FileCheck },
+      ]
+    },
+    {
+      title: 'Teams & Workflow',
+      items: [
+        { name: 'Production Team', href: '/dashboard/production-team', icon: Cog },
+        { name: 'Sales Team', href: '/dashboard/sales-team', icon: Target },
+        { name: 'Workflows', href: '/dashboard/workflows', icon: Zap },
+        { name: 'Workflow Builder', href: '/dashboard/workflows/builder', icon: Settings },
+      ]
+    },
+    {
+      title: 'Customer Analytics',
+      items: [
+        { name: 'Customer Analytics', href: '/dashboard/customers/analytics', icon: Users },
+        { name: 'Retention Analysis', href: '/dashboard/customers/retention', icon: Heart },
+      ]
+    },
+    {
+      title: 'Document Management',
+      items: [
+        { name: 'Documents', href: '/dashboard/documents', icon: FileText },
+        { name: 'PandaDoc Integration', href: '/dashboard/pandadoc', icon: FileSignature },
+      ]
+    },
+    {
+      title: 'Analytics & Reports',
+      items: [
+        { name: 'Analytics Dashboard', href: '/dashboard/analytics', icon: BarChart3 },
+        { name: 'Reports', href: '/dashboard/reports', icon: TrendingUp },
+      ]
+    },
+    {
+      title: 'Administration',
+      items: [
+        { name: 'Settings', href: '/dashboard/settings', icon: Settings },
+        { name: 'Seed Test Data', href: '/dashboard/seed-test-data', icon: Database },
+      ]
+    }
+  ]
+
+  return (
+    <div className="min-h-screen bg-glacier-50 font-roboto">
+      {/* Mobile header */}
+      <div className="lg:hidden bg-white border-b border-stone-200 px-4 py-3">
+        <div className="flex items-center justify-between">
+          <Logo width={60} height={26} />
+          <div className="flex items-center space-x-2">
+            <NotificationCenter />
+            <button
+              type="button"
+              className="p-2 rounded-md text-slate-600 hover:text-slate-900 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-primary"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
+            >
+              {mobileMenuOpen ? (
+                <X className="h-6 w-6" />
+              ) : (
+                <Menu className="h-6 w-6" />
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex">
+        {/* Desktop Sidebar */}
+        <div className="hidden lg:flex lg:w-64 lg:bg-white lg:shadow-sm lg:border-r lg:border-stone-200">
+          <div className="flex flex-col h-screen w-full">
+            {/* Logo and Header Actions */}
+            <div className="h-20 px-6 py-4 border-b border-stone-200 bg-white">
+              <div className="flex items-center justify-center h-full">
+                <Logo width={80} height={35} className="text-slate-900" />
+              </div>
+            </div>
+
+            {/* Navigation */}
+            <div className="flex-1 overflow-y-auto">
+              <CollapsibleNavigation 
+                userId={getUserId()}
+                baseItems={baseNavigation}
+                sections={navigationSections}
+              />
+            </div>
+
+            {/* User info and sign out */}
+            <div className="mt-auto border-t border-stone-200 px-4 py-6">
+              <div className="flex items-center space-x-3 mb-4">
+                <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center flex-shrink-0">
+                  <span className="text-white text-sm font-medium">
+                    {getUserEmailInitial()}
+                  </span>
+                </div>
+                <div className="text-sm min-w-0 flex-1">
+                  <div className="font-medium text-slate-900 truncate">{getUserEmail()}</div>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSignOut}
+                disabled={signingOut}
+                className="w-full"
+              >
+                {signingOut ? (
+                  <div className="flex items-center gap-2">
+                    <div className="inline-block animate-spin rounded-full h-3 w-3 border border-b-0 border-slate-400"></div>
+                    Signing Out...
+                  </div>
+                ) : (
+                  'Sign Out'
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* Mobile Sidebar Overlay */}
+        {mobileMenuOpen && (
+          <div className="fixed inset-0 z-50 lg:hidden">
+            <div 
+              className="fixed inset-0 bg-slate-600 bg-opacity-75" 
+              onClick={() => setMobileMenuOpen(false)}
+              aria-hidden="true"
+            />
+            <div className="fixed inset-y-0 left-0 w-64 bg-white shadow-xl">
+              <div className="flex flex-col h-full">
+                {/* Mobile header */}
+                <div className="flex items-center justify-between h-16 px-6 border-b border-stone-200">
+                  <Logo width={60} height={26} />
+                  <button
+                    type="button"
+                    className="p-2 rounded-md text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                    onClick={() => setMobileMenuOpen(false)}
+                    aria-label="Close menu"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                {/* Mobile Navigation */}
+                <div className="flex-1 overflow-y-auto">
+                  <CollapsibleNavigation 
+                    userId={getUserId()}
+                    baseItems={baseNavigation}
+                    sections={navigationSections}
+                  />
+                </div>
+
+                {/* Mobile User info */}
+                <div className="border-t border-stone-200 px-4 py-6">
+                  <div className="flex items-center space-x-3 mb-4">
+                    <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center flex-shrink-0">
+                      <span className="text-white text-sm font-medium">
+                        {getUserEmailInitial()}
+                      </span>
+                    </div>
+                    <div className="text-sm min-w-0 flex-1">
+                      <div className="font-medium text-slate-900 truncate">{getUserEmail()}</div>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSignOut}
+                    disabled={signingOut}
+                    className="w-full"
+                  >
+                    {signingOut ? (
+                      <div className="flex items-center gap-2">
+                        <div className="inline-block animate-spin rounded-full h-3 w-3 border border-b-0 border-slate-400"></div>
+                        Signing Out...
+                      </div>
+                    ) : (
+                      'Sign Out'
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Main content */}
+        <div className="flex-1 w-0">
+          {/* Top bar with global search and notifications */}
+          <div className="bg-white border-b border-stone-200 px-4 sm:px-6 lg:px-8 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex-1 max-w-lg">
+                <GlobalSearch 
+                  placeholder="Search orders, customers, products..."
+                  size="md"
+                />
+              </div>
+              <div className="hidden sm:block">
+                <EnhancedNotificationCenter />
+              </div>
+            </div>
+          </div>
+          
+          <div className="p-4 sm:p-6 lg:p-8">
+            <ErrorBoundary level="page" showDetails={process.env.NODE_ENV === 'development'}>
+              {children}
+            </ErrorBoundary>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

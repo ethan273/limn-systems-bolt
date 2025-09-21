@@ -1,0 +1,2023 @@
+'use client'
+
+import { useEffect, useState, useMemo, useCallback, useReducer } from 'react'
+import { useRouter } from 'next/navigation'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Button } from '@/components/ui/button'
+import { PageHeader } from '@/components/ui/page-header'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogFooter 
+} from '@/components/ui/dialog'
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from '@/components/ui/select'
+import { Edit, Trash2, Bell } from 'lucide-react'
+import OrdersTable from '@/components/orders/OrdersTable'
+import OrdersFilters from '@/components/orders/OrdersFilters'
+import OrdersStats from '@/components/orders/OrdersStats'
+import OrderDetailsView from '@/components/orders/OrderDetailsView'
+
+interface Project {
+  id: string
+  name: string
+  client_name: string
+}
+
+interface Item {
+  id: string
+  name: string
+  sku_base: string
+  base_price: number
+  lead_time_days: number
+  collection_name?: string
+  available_finishes?: string[]
+  available_fabrics?: string[]
+  dimension_units: 'inches' | 'cm'
+  width?: number
+  depth?: number
+  height?: number
+}
+
+interface OrderLineItem {
+  id: string
+  item_id: string
+  item?: Item
+  quantity: number
+  unit_price: number
+  customizations: {
+    fabric?: string
+    finish?: string
+    dimensions?: {
+      width?: number
+      depth?: number
+      height?: number
+    }
+    notes?: string
+  }
+  lead_time_days: number
+  line_total: number
+  production_status: 'pending' | 'in_production' | 'quality_check' | 'ready' | 'shipped' | 'delivered'
+  estimated_completion?: string
+  actual_completion?: string
+  production_notes?: string
+}
+
+interface Order {
+  id: string
+  order_number: string
+  project_id: string
+  project?: Project
+  category: 'furniture' | 'decking' | 'cladding' | 'fixtures' | 'custom_millwork'
+  status: 'draft' | 'confirmed' | 'in_production' | 'ready_to_ship' | 'shipped' | 'delivered'
+  line_items: OrderLineItem[]
+  subtotal: number
+  tax_amount: number
+  total_amount: number
+  deposit_percentage: number
+  deposit_amount: number
+  balance_amount: number
+  deposit_paid_date?: string
+  balance_paid_date?: string
+  payment_status: 'pending' | 'deposit_paid' | 'fully_paid'
+  po_number?: string
+  po_file_url?: string
+  estimated_delivery_date?: string
+  actual_delivery_date?: string
+  created_at: string
+  updated_at?: string
+  notes?: string
+  client_notes?: string
+}
+
+interface OrderFormData {
+  project_id: string
+  category: 'furniture' | 'decking' | 'cladding' | 'fixtures' | 'custom_millwork'
+  po_number: string
+  estimated_delivery_date: string
+  notes: string
+  client_notes: string
+}
+
+interface LineItemFormData {
+  item_id: string
+  quantity: number
+  unit_price: string
+  customizations: {
+    fabric: string
+    finish: string
+    width: string
+    depth: string
+    height: string
+    notes: string
+  }
+  lead_time_days: number
+}
+
+export default function OrdersPage() {
+  const router = useRouter()
+
+  // Line item editing state (keeping separate for now)
+  const [editingLineItem, setEditingLineItem] = useState<OrderLineItem | null>(null)
+  const [showEditLineItemDialog, setShowEditLineItemDialog] = useState(false)
+  const [editLineItemFormData, setEditLineItemFormData] = useState<Partial<OrderLineItem>>({})
+  
+  // Customer notification state
+  const [showNotificationDialog, setShowNotificationDialog] = useState(false)
+  const [notificationMessage, setNotificationMessage] = useState('')
+  const [notificationOrder, setNotificationOrder] = useState<Order | null>(null)
+
+  useEffect(() => {
+    fetchOrders()
+    fetchProjects()
+    fetchItems()
+  }, [])
+
+  const fetchProjects = async () => {
+    try {
+      const response = await fetch('/api/projects', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include'
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        if (data.data && Array.isArray(data.data)) {
+          // Transform API response to match Project interface
+          const transformedProjects: Project[] = data.data.map((project: any) => ({
+            id: project.id,
+            name: project.name,
+            client_name: project.client_name || project.customer_name || 'Unknown Client'
+          }))
+          dispatch({ type: 'SET_PROJECTS', payload: transformedProjects })
+          console.log(`Loaded ${transformedProjects.length} projects from API`)
+          return
+        }
+      }
+      
+      throw new Error('Failed to fetch projects')
+    } catch (error) {
+      console.error('Error fetching projects:', error)
+      // Fallback to mock data
+      const fallbackProjects: Project[] = [
+        { id: '1', name: 'Oceanside Resort Lobby Renovation', client_name: 'Oceanside Resort & Spa' },
+        { id: '2', name: 'TechFlow Office Expansion', client_name: 'TechFlow Corporate' },
+        { id: '3', name: 'Green Valley Hotel Pool Deck', client_name: 'Green Valley Hotels' },
+        { id: '4', name: 'Mountain View Library Upgrade', client_name: 'Mountain View Education Foundation' }
+      ]
+      dispatch({ type: 'SET_PROJECTS', payload: fallbackProjects })
+      console.log('Projects: Fallback to mock data')
+    }
+  }
+
+  const fetchItems = async () => {
+    try {
+      const response = await fetch('/api/items', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include'
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        if (data.data && Array.isArray(data.data)) {
+          // Transform API response to match Item interface
+          const transformedItems: Item[] = data.data.map((item: any) => ({
+            id: item.id,
+            name: item.name,
+            sku_base: item.sku || item.sku_base || `SKU-${item.id}`,
+            base_price: parseFloat(item.price || item.base_price || '0'),
+            lead_time_days: parseInt(item.lead_time_days || item.lead_time || '30'),
+            collection_name: item.collection_name || item.category || 'Standard Collection',
+            available_finishes: item.available_finishes || ['Standard'],
+            available_fabrics: item.available_fabrics || [],
+            dimension_units: 'inches',
+            width: parseFloat(item.width || '0') || undefined,
+            depth: parseFloat(item.depth || '0') || undefined,
+            height: parseFloat(item.height || '0') || undefined
+          }))
+          dispatch({ type: 'SET_ITEMS', payload: transformedItems })
+          console.log(`Loaded ${transformedItems.length} items from API`)
+          return
+        }
+      }
+      
+      throw new Error('Failed to fetch items')
+    } catch (error) {
+      console.error('Error fetching items:', error)
+      // Fallback to mock data
+      const fallbackItems: Item[] = [
+        {
+          id: '1',
+          name: 'Executive Office Chair',
+          sku_base: 'CHAIR-EXEC-01',
+          base_price: 1250.00,
+          lead_time_days: 21,
+          collection_name: 'Executive Collection',
+          available_finishes: ['Natural Oak', 'Walnut', 'Cherry', 'Ebony'],
+          available_fabrics: ['Leather Black', 'Leather Brown', 'Fabric Charcoal', 'Fabric Navy'],
+          dimension_units: 'inches',
+          width: 28,
+          depth: 30,
+          height: 45
+        },
+        {
+          id: '2',
+          name: 'Conference Table - 8ft',
+          sku_base: 'TABLE-CONF-8FT',
+          base_price: 3250.00,
+          lead_time_days: 35,
+          collection_name: 'Conference Collection',
+          available_finishes: ['Natural Oak', 'Walnut', 'Cherry'],
+          dimension_units: 'inches',
+          width: 96,
+          depth: 48,
+          height: 30
+        },
+        {
+          id: '3',
+          name: 'Outdoor Lounge Chair',
+          sku_base: 'CHAIR-OUT-01',
+          base_price: 850.00,
+          lead_time_days: 28,
+          collection_name: 'Outdoor Collection',
+          available_finishes: ['Teak Natural', 'Teak Weathered', 'Aluminum Black'],
+          available_fabrics: ['Sunbrella Navy', 'Sunbrella Charcoal', 'Sunbrella Beige'],
+          dimension_units: 'inches',
+          width: 32,
+          depth: 34,
+          height: 35
+        },
+        {
+          id: '4',
+          name: 'Premium Composite Decking',
+          sku_base: 'DECK-COMP-01',
+          base_price: 45.00,
+          lead_time_days: 14,
+          collection_name: 'Decking Collection',
+          available_finishes: ['Gray', 'Brown', 'Natural'],
+          dimension_units: 'inches',
+          width: 5.5,
+          depth: 1,
+          height: 144
+        },
+        {
+          id: '5',
+          name: 'Designer Pendant Light',
+          sku_base: 'LIGHT-PEND-01',
+          base_price: 320.00,
+          lead_time_days: 18,
+          collection_name: 'Lighting Collection',
+          available_finishes: ['Brass', 'Black', 'Chrome', 'Bronze'],
+          dimension_units: 'inches',
+          width: 12,
+          depth: 12,
+          height: 18
+        }
+      ]
+      dispatch({ type: 'SET_ITEMS', payload: fallbackItems })
+      console.log('Items: Fallback to mock data')
+    }
+  }
+
+  const fetchOrders = useCallback(async () => {
+    try {
+      dispatch({ type: 'SET_LOADING', payload: true })
+      
+      // Fetch real orders from API
+      const response = await fetch('/api/orders', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include'
+      })
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: Failed to fetch orders`)
+      }
+      
+      const data = await response.json()
+      console.log('Orders page: API response -', { hasOrders: !!data.orders, ordersLength: data.orders?.length, fullData: data })
+      
+      if (data.orders) {
+        // API returns orders in different format, transform to match interface
+        const transformedOrders: Order[] = data.orders.map((order: any) => ({
+          id: order.id,
+          order_number: order.order_number || `ORD-${order.id}`,
+          project_id: order.project_id,
+          project: order.project ? {
+            id: order.project.id,
+            name: order.project.name,
+            client_name: order.project.client_name
+          } : undefined,
+          category: order.category || 'furniture',
+          status: order.status || 'draft',
+          line_items: order.order_items || [],
+          subtotal: order.subtotal || 0,
+          tax_amount: order.tax_amount || 0,
+          total_amount: order.total_amount || 0,
+          deposit_percentage: order.deposit_percentage || 20,
+          deposit_amount: order.deposit_amount || 0,
+          balance_amount: order.balance_amount || 0,
+          deposit_paid_date: order.deposit_paid_date,
+          balance_paid_date: order.balance_paid_date,
+          payment_status: order.payment_status || 'pending',
+          po_number: order.po_number,
+          po_file_url: order.po_file_url,
+          estimated_delivery_date: order.estimated_delivery_date,
+          actual_delivery_date: order.actual_delivery_date,
+          created_at: order.created_at || order.order_date,
+          updated_at: order.updated_at,
+          notes: order.notes,
+          client_notes: order.client_notes
+        }))
+        
+        dispatch({ type: 'SET_ORDERS', payload:  transformedOrders })
+        console.log(`Loaded ${transformedOrders.length} orders from API`)
+        dispatch({ type: 'SET_LOADING', payload: false })
+      } else {
+        // Fallback to empty array if no orders
+        dispatch({ type: 'SET_ORDERS', payload: [] })
+        console.log('No orders found in API response')
+        dispatch({ type: 'SET_LOADING', payload: false })
+      }
+      
+      dispatch({ type: 'SET_ERROR', payload: '' })
+    } catch (error) {
+      console.error('Error fetching orders:', error)
+      dispatch({ type: 'SET_ERROR', payload: error instanceof Error ? error.message : 'Failed to load orders' })
+      
+      // Fallback to mock data if API fails (for development)
+      try {
+        const fallbackOrders: Order[] = [
+        {
+          id: '1',
+          order_number: 'ORD-2024-001',
+          project_id: '1',
+          project: { id: '1', name: 'Oceanside Resort Lobby Renovation', client_name: 'Oceanside Resort & Spa' },
+          category: 'furniture',
+          status: 'delivered',
+          line_items: [
+            {
+              id: '1',
+              item_id: '1',
+              item: {
+                id: '1',
+                name: 'Executive Office Chair',
+                sku_base: 'CHAIR-EXEC-01',
+                base_price: 1250.00,
+                lead_time_days: 21,
+                collection_name: 'Executive Collection',
+                dimension_units: 'inches'
+              },
+              quantity: 4,
+              unit_price: 1200.00,
+              customizations: {
+                fabric: 'Leather Brown',
+                finish: 'Walnut',
+                notes: 'Executive height adjustment required'
+              },
+              lead_time_days: 21,
+              line_total: 4800.00,
+              production_status: 'delivered',
+              estimated_completion: '2024-02-10',
+              actual_completion: '2024-02-08'
+            },
+            {
+              id: '2',
+              item_id: '2',
+              item: {
+                id: '2',
+                name: 'Conference Table - 8ft',
+                sku_base: 'TABLE-CONF-8FT',
+                base_price: 3250.00,
+                lead_time_days: 35,
+                collection_name: 'Conference Collection',
+                dimension_units: 'inches'
+              },
+              quantity: 2,
+              unit_price: 3100.00,
+              customizations: {
+                finish: 'Walnut',
+                notes: 'Cable management integrated'
+              },
+              lead_time_days: 35,
+              line_total: 6200.00,
+              production_status: 'delivered',
+              estimated_completion: '2024-02-15',
+              actual_completion: '2024-02-15'
+            }
+          ],
+          subtotal: 11000.00,
+          tax_amount: 880.00,
+          total_amount: 11880.00,
+          deposit_percentage: 50,
+          deposit_amount: 5940.00,
+          balance_amount: 5940.00,
+          deposit_paid_date: '2024-01-20',
+          balance_paid_date: '2024-02-28',
+          payment_status: 'fully_paid',
+          po_number: 'PO-OSR-2024-001',
+          estimated_delivery_date: '2024-02-18',
+          actual_delivery_date: '2024-02-18',
+          created_at: '2024-01-15T10:00:00.000Z',
+          updated_at: '2024-02-28T16:30:00.000Z',
+          notes: 'Rush delivery requested by client',
+          client_notes: 'Please coordinate with facilities manager for delivery'
+        },
+        {
+          id: '2',
+          order_number: 'ORD-2024-004',
+          project_id: '2',
+          project: { id: '2', name: 'TechFlow Office Expansion', client_name: 'TechFlow Corporate' },
+          category: 'furniture',
+          status: 'in_production',
+          line_items: [
+            {
+              id: '3',
+              item_id: '1',
+              item: {
+                id: '1',
+                name: 'Executive Office Chair',
+                sku_base: 'CHAIR-EXEC-01',
+                base_price: 1250.00,
+                lead_time_days: 21,
+                collection_name: 'Executive Collection',
+                dimension_units: 'inches'
+              },
+              quantity: 25,
+              unit_price: 1150.00,
+              customizations: {
+                fabric: 'Fabric Charcoal',
+                finish: 'Natural Oak',
+                notes: 'Ergonomic adjustments for open office'
+              },
+              lead_time_days: 28,
+              line_total: 28750.00,
+              production_status: 'in_production',
+              estimated_completion: '2024-03-25',
+              production_notes: 'Fabric ordered, frame production in progress'
+            },
+            {
+              id: '4',
+              item_id: '2',
+              item: {
+                id: '2',
+                name: 'Conference Table - 8ft',
+                sku_base: 'TABLE-CONF-8FT',
+                base_price: 3250.00,
+                lead_time_days: 35,
+                collection_name: 'Conference Collection',
+                dimension_units: 'inches'
+              },
+              quantity: 3,
+              unit_price: 3100.00,
+              customizations: {
+                finish: 'Natural Oak',
+                notes: 'Power/data integration required'
+              },
+              lead_time_days: 42,
+              line_total: 9300.00,
+              production_status: 'pending',
+              estimated_completion: '2024-04-05'
+            }
+          ],
+          subtotal: 38050.00,
+          tax_amount: 3044.00,
+          total_amount: 41094.00,
+          deposit_percentage: 50,
+          deposit_amount: 20547.00,
+          balance_amount: 20547.00,
+          deposit_paid_date: '2024-02-05',
+          payment_status: 'deposit_paid',
+          po_number: 'PO-TF-2024-001',
+          estimated_delivery_date: '2024-04-10',
+          created_at: '2024-02-01T10:00:00.000Z',
+          updated_at: '2024-03-10T14:20:00.000Z',
+          notes: 'Large volume order with extended timeline'
+        },
+        {
+          id: '3',
+          order_number: 'ORD-2024-007',
+          project_id: '3',
+          project: { id: '3', name: 'Green Valley Hotel Pool Deck', client_name: 'Green Valley Hotels' },
+          category: 'decking',
+          status: 'confirmed',
+          line_items: [
+            {
+              id: '5',
+              item_id: '4',
+              item: {
+                id: '4',
+                name: 'Premium Composite Decking',
+                sku_base: 'DECK-COMP-01',
+                base_price: 45.00,
+                lead_time_days: 14,
+                collection_name: 'Decking Collection',
+                dimension_units: 'inches'
+              },
+              quantity: 850,
+              unit_price: 42.00,
+              customizations: {
+                finish: 'Gray',
+                notes: 'Marine-grade treatment for pool environment'
+              },
+              lead_time_days: 21,
+              line_total: 35700.00,
+              production_status: 'pending',
+              estimated_completion: '2024-04-15'
+            }
+          ],
+          subtotal: 35700.00,
+          tax_amount: 2856.00,
+          total_amount: 38556.00,
+          deposit_percentage: 50,
+          deposit_amount: 19278.00,
+          balance_amount: 19278.00,
+          payment_status: 'pending',
+          po_number: 'PO-GVH-2024-001',
+          estimated_delivery_date: '2024-04-20',
+          created_at: '2024-03-10T10:00:00.000Z',
+          notes: 'Seasonal project - critical timeline'
+        }
+      ]
+
+        dispatch({ type: 'SET_ORDERS', payload: fallbackOrders })
+        dispatch({ type: 'SET_ERROR', payload: '' })
+        console.log('Orders: Fallback to mock data -', fallbackOrders.length, 'orders')
+      } catch (fallbackError) {
+        dispatch({ type: 'SET_ERROR', payload: 'Failed to load orders' })
+        console.error('Orders: Error loading fallback data:', fallbackError)
+      } finally {
+        dispatch({ type: 'SET_LOADING', payload: false })
+      }
+    }
+  }, [])  // Empty dependency array since function doesn't depend on props/state
+
+  const handleCreateOrder = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setActionLoading('create')
+
+    try {
+      const orderData = {
+        customerId: orderFormData.project_id, // Map project_id to customerId for API
+        orderNumber: `ORD-${new Date().getFullYear()}-${String(orders.length + 1).padStart(3, '0')}`,
+        status: 'draft',
+        priority: 'medium',
+        dueDate: orderFormData.estimated_delivery_date || undefined,
+        notes: orderFormData.notes || undefined,
+        shippingAddress: orderFormData.client_notes || undefined, // Reuse for now
+        items: [] // Start with empty items array
+      }
+
+      const response = await fetch('/api/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify(orderData)
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to create order')
+      }
+
+      const result = await response.json()
+      
+      if (result.success && result.data) {
+        // Refresh orders list to show the new order
+        await fetchOrders()
+        
+        // Find and select the newly created order
+        const newOrder = orders.find(o => o.id === result.data.id)
+        if (newOrder) {
+          setSelectedOrder(newOrder)
+          setActiveTab('details')
+        }
+        
+        setSuccess('Order created successfully')
+      } else {
+        throw new Error('Failed to create order - invalid response')
+      }
+
+      setShowCreateForm(false)
+      setOrderFormData({
+        project_id: '',
+        category: 'furniture',
+        po_number: '',
+        estimated_delivery_date: '',
+        notes: '',
+        client_notes: ''
+      })
+      dispatch({ type: 'SET_ERROR', payload: '' })
+    } catch (err) {
+      console.error('Error creating order:', err)
+      dispatch({ type: 'SET_ERROR', payload: err instanceof Error ? err.message : 'Failed to create order' })
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleAddLineItem = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedOrder) return
+
+    setActionLoading('add_line_item')
+
+    try {
+      const selectedItem = items.find(i => i.id === lineItemFormData.item_id)
+      if (!selectedItem) {
+        dispatch({ type: 'SET_ERROR', payload: 'Selected item not found' })
+        return
+      }
+
+      const unitPrice = parseFloat(lineItemFormData.unit_price) || selectedItem.base_price
+      const lineTotal = unitPrice * lineItemFormData.quantity
+
+      const newLineItem: OrderLineItem = {
+        id: `line-${Date.now()}`,
+        item_id: lineItemFormData.item_id,
+        item: selectedItem,
+        quantity: lineItemFormData.quantity,
+        unit_price: unitPrice,
+        customizations: {
+          fabric: lineItemFormData.customizations.fabric || undefined,
+          finish: lineItemFormData.customizations.finish || undefined,
+          dimensions: {
+            width: lineItemFormData.customizations.width ? parseFloat(lineItemFormData.customizations.width) : undefined,
+            depth: lineItemFormData.customizations.depth ? parseFloat(lineItemFormData.customizations.depth) : undefined,
+            height: lineItemFormData.customizations.height ? parseFloat(lineItemFormData.customizations.height) : undefined
+          },
+          notes: lineItemFormData.customizations.notes || undefined
+        },
+        lead_time_days: lineItemFormData.lead_time_days,
+        line_total: lineTotal,
+        production_status: 'pending'
+      }
+
+      const updatedOrder = {
+        ...selectedOrder,
+        line_items: [...selectedOrder.line_items, newLineItem]
+      }
+
+      // Recalculate totals
+      updatedOrder.subtotal = updatedOrder.line_items.reduce((sum, item) => sum + item.line_total, 0)
+      updatedOrder.tax_amount = updatedOrder.subtotal * 0.08 // 8% tax
+      updatedOrder.total_amount = updatedOrder.subtotal + updatedOrder.tax_amount
+      updatedOrder.deposit_amount = updatedOrder.total_amount * (updatedOrder.deposit_percentage / 100)
+      updatedOrder.balance_amount = updatedOrder.total_amount - updatedOrder.deposit_amount
+
+      // Update orders list and selected order
+      dispatch({ type: 'SET_ORDERS', payload: orders.map(o => o.id === selectedOrder.id ? updatedOrder : o) })
+      setSelectedOrder(updatedOrder)
+
+      setShowLineItemForm(false)
+      setLineItemFormData({
+        item_id: '',
+        quantity: 1,
+        unit_price: '',
+        customizations: {
+          fabric: '',
+          finish: '',
+          width: '',
+          depth: '',
+          height: '',
+          notes: ''
+        },
+        lead_time_days: 30
+      })
+      dispatch({ type: 'SET_ERROR', payload: '' })
+    } catch (err) {
+      dispatch({ type: 'SET_ERROR', payload: 'Failed to add line item' })
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const updateOrderStatus = async (orderId: string, newStatus: Order['status']) => {
+    setActionLoading(`status-${orderId}`)
+
+    try {
+      const updatedOrders = orders.map(order => 
+        order.id === orderId 
+          ? { ...order, status: newStatus, updated_at: new Date().toISOString() }
+          : order
+      )
+      
+      dispatch({ type: 'SET_ORDERS', payload: updatedOrders })
+      
+      if (selectedOrder && selectedOrder.id === orderId) {
+        setSelectedOrder({ ...selectedOrder, status: newStatus })
+      }
+      
+      setSuccess(`Order status updated to ${newStatus.replace('_', ' ')}`)
+    } catch (err) {
+      dispatch({ type: 'SET_ERROR', payload: 'Failed to update order status' })
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  // Reducer for complex state management
+  type AppState = {
+    orders: Order[]
+    projects: Project[]
+    items: Item[]
+    loading: boolean
+    error: string
+    success: string
+    showCreateForm: boolean
+    showLineItemForm: boolean
+    editingOrder: Order | null
+    selectedOrder: Order | null
+    activeTab: 'list' | 'details'
+    actionLoading: string | null
+    statusFilter: string
+    categoryFilter: string
+    projectFilter: string
+    orderFormData: OrderFormData
+    lineItemFormData: LineItemFormData
+  }
+
+  type AppAction =
+    | { type: 'SET_ORDERS'; payload: Order[] }
+    | { type: 'SET_PROJECTS'; payload: Project[] }
+    | { type: 'SET_ITEMS'; payload: Item[] }
+    | { type: 'SET_LOADING'; payload: boolean }
+    | { type: 'SET_ERROR'; payload: string }
+    | { type: 'SET_SUCCESS'; payload: string }
+    | { type: 'SET_SHOW_CREATE_FORM'; payload: boolean }
+    | { type: 'SET_SHOW_LINE_ITEM_FORM'; payload: boolean }
+    | { type: 'SET_EDITING_ORDER'; payload: Order | null }
+    | { type: 'SET_SELECTED_ORDER'; payload: Order | null }
+    | { type: 'SET_ACTIVE_TAB'; payload: 'list' | 'details' }
+    | { type: 'SET_ACTION_LOADING'; payload: string | null }
+    | { type: 'SET_STATUS_FILTER'; payload: string }
+    | { type: 'SET_CATEGORY_FILTER'; payload: string }
+    | { type: 'SET_PROJECT_FILTER'; payload: string }
+    | { type: 'SET_ORDER_FORM_DATA'; payload: OrderFormData }
+    | { type: 'SET_LINE_ITEM_FORM_DATA'; payload: LineItemFormData }
+    | { type: 'UPDATE_ORDER_FORM_FIELD'; payload: { field: keyof OrderFormData; value: any } }
+    | { type: 'UPDATE_LINE_ITEM_FORM_FIELD'; payload: { field: keyof LineItemFormData; value: any } }
+    | { type: 'RESET_FORMS' }
+
+  const initialState: AppState = {
+    orders: [],
+    projects: [],
+    items: [],
+    loading: true,
+    error: '',
+    success: '',
+    showCreateForm: false,
+    showLineItemForm: false,
+    editingOrder: null,
+    selectedOrder: null,
+    activeTab: 'list',
+    actionLoading: null,
+    statusFilter: 'all',
+    categoryFilter: 'all',
+    projectFilter: 'all',
+    orderFormData: {
+      project_id: '',
+      category: 'furniture',
+      po_number: '',
+      estimated_delivery_date: '',
+      notes: '',
+      client_notes: ''
+    },
+    lineItemFormData: {
+      item_id: '',
+      quantity: 1,
+      unit_price: '',
+      finish: '',
+      fabric: '',
+      notes: ''
+    }
+  }
+
+  function appReducer(state: AppState, action: AppAction): AppState {
+    switch (action.type) {
+      case 'SET_ORDERS':
+        return { ...state, orders: action.payload }
+      case 'SET_PROJECTS':
+        return { ...state, projects: action.payload }
+      case 'SET_ITEMS':
+        return { ...state, items: action.payload }
+      case 'SET_LOADING':
+        return { ...state, loading: action.payload }
+      case 'SET_ERROR':
+        return { ...state, error: action.payload, success: '' }
+      case 'SET_SUCCESS':
+        return { ...state, success: action.payload, error: '' }
+      case 'SET_SHOW_CREATE_FORM':
+        return { ...state, showCreateForm: action.payload }
+      case 'SET_SHOW_LINE_ITEM_FORM':
+        return { ...state, showLineItemForm: action.payload }
+      case 'SET_EDITING_ORDER':
+        return { ...state, editingOrder: action.payload }
+      case 'SET_SELECTED_ORDER':
+        return { ...state, selectedOrder: action.payload }
+      case 'SET_ACTIVE_TAB':
+        return { ...state, activeTab: action.payload }
+      case 'SET_ACTION_LOADING':
+        return { ...state, actionLoading: action.payload }
+      case 'SET_STATUS_FILTER':
+        return { ...state, statusFilter: action.payload }
+      case 'SET_CATEGORY_FILTER':
+        return { ...state, categoryFilter: action.payload }
+      case 'SET_PROJECT_FILTER':
+        return { ...state, projectFilter: action.payload }
+      case 'SET_ORDER_FORM_DATA':
+        return { ...state, orderFormData: action.payload }
+      case 'SET_LINE_ITEM_FORM_DATA':
+        return { ...state, lineItemFormData: action.payload }
+      case 'UPDATE_ORDER_FORM_FIELD':
+        return {
+          ...state,
+          orderFormData: {
+            ...state.orderFormData,
+            [action.payload.field]: action.payload.value
+          }
+        }
+      case 'UPDATE_LINE_ITEM_FORM_FIELD':
+        return {
+          ...state,
+          lineItemFormData: {
+            ...state.lineItemFormData,
+            [action.payload.field]: action.payload.value
+          }
+        }
+      case 'RESET_FORMS':
+        return {
+          ...state,
+          orderFormData: initialState.orderFormData,
+          lineItemFormData: initialState.lineItemFormData,
+          showCreateForm: false,
+          showLineItemForm: false,
+          editingOrder: null
+        }
+      default:
+        return state
+    }
+  }
+
+  const [state, dispatch] = useReducer(appReducer, initialState)
+
+  // Destructure state for easier access
+  const {
+    orders,
+    projects,
+    items,
+    loading,
+    error,
+    success,
+    showCreateForm,
+    showLineItemForm,
+    editingOrder,
+    selectedOrder,
+    activeTab,
+    actionLoading,
+    statusFilter,
+    categoryFilter,
+    projectFilter,
+    orderFormData,
+    lineItemFormData
+  } = state
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD'
+    }).format(amount)
+  }
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    })
+  }
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'draft': return 'bg-stone-100 text-stone-700'
+      case 'confirmed': return 'bg-blue-100 text-blue-700'
+      case 'in_production': return 'bg-amber-100 text-amber-700'
+      case 'ready_to_ship': return 'bg-purple-100 text-purple-700'
+      case 'shipped': return 'bg-emerald-100 text-emerald-700'
+      case 'delivered': return 'bg-primary/10 text-primary'
+      default: return 'bg-stone-100 text-stone-700'
+    }
+  }
+
+  const getCategoryColor = (category: string) => {
+    switch (category) {
+      case 'furniture': return 'bg-blue-100 text-blue-700'
+      case 'decking': return 'bg-emerald-100 text-emerald-700'
+      case 'cladding': return 'bg-purple-100 text-purple-700'
+      case 'fixtures': return 'bg-amber-100 text-amber-700'
+      case 'custom_millwork': return 'bg-rose-100 text-rose-700'
+      default: return 'bg-stone-100 text-stone-700'
+    }
+  }
+
+  const getPaymentStatusColor = (status: string) => {
+    switch (status) {
+      case 'pending': return 'bg-stone-100 text-stone-700'
+      case 'deposit_paid': return 'bg-amber-100 text-amber-700'
+      case 'fully_paid': return 'bg-primary/10 text-primary'
+      default: return 'bg-stone-100 text-stone-700'
+    }
+  }
+
+  const getProductionStatusColor = (status: string) => {
+    switch (status) {
+      case 'pending': return 'bg-stone-100 text-stone-700'
+      case 'in_production': return 'bg-amber-100 text-amber-700'
+      case 'quality_check': return 'bg-purple-100 text-purple-700'
+      case 'ready': return 'bg-emerald-100 text-emerald-700'
+      case 'shipped': return 'bg-blue-100 text-blue-700'
+      case 'delivered': return 'bg-primary/10 text-primary'
+      default: return 'bg-stone-100 text-stone-700'
+    }
+  }
+
+  const viewOrderDetails = (order: Order) => {
+    setSelectedOrder(order)
+    setActiveTab('details')
+  }
+
+  const backToList = () => {
+    setSelectedOrder(null)
+    setActiveTab('list')
+  }
+
+  // Line item editing functions
+  const handleEditLineItem = (lineItem: OrderLineItem) => {
+    setEditingLineItem(lineItem)
+    setEditLineItemFormData({
+      quantity: lineItem.quantity,
+      unit_price: lineItem.unit_price,
+      customizations: lineItem.customizations,
+      lead_time_days: lineItem.lead_time_days,
+      production_status: lineItem.production_status,
+      production_notes: lineItem.production_notes || ''
+    })
+    setShowEditLineItemDialog(true)
+  }
+
+  const handleSaveLineItem = async () => {
+    if (!editingLineItem || !selectedOrder) return
+    
+    setActionLoading(`edit-${editingLineItem.id}`)
+    
+    try {
+      const updatedLineItem = {
+        ...editingLineItem,
+        ...editLineItemFormData,
+        line_total: (editLineItemFormData.quantity || editingLineItem.quantity) * (editLineItemFormData.unit_price || editingLineItem.unit_price)
+      }
+
+      const updatedOrder = {
+        ...selectedOrder,
+        line_items: selectedOrder.line_items.map(item => 
+          item.id === editingLineItem.id ? updatedLineItem : item
+        )
+      }
+
+      // Recalculate totals
+      updatedOrder.subtotal = updatedOrder.line_items.reduce((sum, item) => sum + item.line_total, 0)
+      updatedOrder.tax_amount = updatedOrder.subtotal * 0.08
+      updatedOrder.total_amount = updatedOrder.subtotal + updatedOrder.tax_amount
+      updatedOrder.deposit_amount = updatedOrder.total_amount * (updatedOrder.deposit_percentage / 100)
+      updatedOrder.balance_amount = updatedOrder.total_amount - updatedOrder.deposit_amount
+
+      // Update state
+      dispatch({ type: 'SET_ORDERS', payload: orders.map(o => o.id === selectedOrder.id ? updatedOrder : o) })
+      setSelectedOrder(updatedOrder)
+      
+      setShowEditLineItemDialog(false)
+      setEditingLineItem(null)
+      setEditLineItemFormData({})
+      setSuccess('Line item updated successfully')
+    } catch (err) {
+      dispatch({ type: 'SET_ERROR', payload: 'Failed to update line item' })
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleRemoveLineItem = async (lineItemId: string) => {
+    if (!selectedOrder) return
+    
+    setActionLoading(`remove-${lineItemId}`)
+    
+    try {
+      const updatedOrder = {
+        ...selectedOrder,
+        line_items: selectedOrder.line_items.filter(item => item.id !== lineItemId)
+      }
+
+      // Recalculate totals
+      updatedOrder.subtotal = updatedOrder.line_items.reduce((sum, item) => sum + item.line_total, 0)
+      updatedOrder.tax_amount = updatedOrder.subtotal * 0.08
+      updatedOrder.total_amount = updatedOrder.subtotal + updatedOrder.tax_amount
+      updatedOrder.deposit_amount = updatedOrder.total_amount * (updatedOrder.deposit_percentage / 100)
+      updatedOrder.balance_amount = updatedOrder.total_amount - updatedOrder.deposit_amount
+
+      dispatch({ type: 'SET_ORDERS', payload: orders.map(o => o.id === selectedOrder.id ? updatedOrder : o) })
+      setSelectedOrder(updatedOrder)
+      setSuccess('Line item removed successfully')
+    } catch (err) {
+      dispatch({ type: 'SET_ERROR', payload: 'Failed to remove line item' })
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  // Customer notification functions
+  const handleNotifyCustomer = (order: Order) => {
+    setNotificationOrder(order)
+    setNotificationMessage(`Update on your order #${order.order_number}: `)
+    setShowNotificationDialog(true)
+  }
+
+  const sendNotification = async () => {
+    if (!notificationOrder || !notificationMessage.trim()) return
+    
+    setActionLoading('notification')
+    
+    try {
+      const response = await fetch(`/api/orders/${notificationOrder.id}/notify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          type: 'email', // Default to email
+          template: 'custom',
+          subject: `Order Update - ${notificationOrder.order_number}`,
+          message: notificationMessage
+        })
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to send notification')
+      }
+      
+      setSuccess('Customer notification sent successfully')
+      setShowNotificationDialog(false)
+      setNotificationMessage('')
+      setNotificationOrder(null)
+    } catch (err) {
+      console.error('Notification error:', err)
+      dispatch({ type: 'SET_ERROR', payload: err instanceof Error ? err.message : 'Failed to send notification' })
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const filteredOrders = useMemo(() => {
+    return orders.filter(order => {
+      const matchesStatus = statusFilter === 'all' || order.status === statusFilter
+      const matchesCategory = categoryFilter === 'all' || order.category === categoryFilter
+      const matchesProject = projectFilter === 'all' || order.project_id === projectFilter
+      return matchesStatus && matchesCategory && matchesProject
+    })
+  }, [orders, statusFilter, categoryFilter, projectFilter])
+
+  if (activeTab === 'details' && selectedOrder) {
+    return (
+      <OrderDetailsView
+        selectedOrder={selectedOrder}
+        backToList={backToList}
+        setShowLineItemForm={setShowLineItemForm}
+        showLineItemForm={showLineItemForm}
+        lineItemFormData={lineItemFormData}
+        setLineItemFormData={setLineItemFormData}
+        items={items}
+        editLineItemFormData={editLineItemFormData}
+        setEditLineItemFormData={setEditLineItemFormData}
+        editingLineItem={editingLineItem}
+        setEditingLineItem={setEditingLineItem}
+        actionLoading={actionLoading}
+        addLineItem={addLineItem}
+        updateLineItem={updateLineItem}
+        removeLineItem={removeLineItem}
+        updateOrderStatus={updateOrderStatus}
+        duplicateOrder={duplicateOrder}
+        showNotificationDialog={showNotificationDialog}
+        setShowNotificationDialog={setShowNotificationDialog}
+        notificationOrder={notificationOrder}
+        notificationMessage={notificationMessage}
+        setNotificationMessage={setNotificationMessage}
+        sendNotification={sendNotification}
+      />
+    )
+  }
+            </Button>
+            <div>
+              <h1 className="text-4xl font-bold text-heading">{selectedOrder.order_number}</h1>
+              <p className="text-slate-600 mt-1">
+                {selectedOrder.project?.name} - {selectedOrder.project?.client_name}
+              </p>
+            </div>
+          </div>
+          <div className="flex space-x-3">
+            <Button 
+              variant="outline"
+              onClick={() => setShowLineItemForm(true)}
+              disabled={selectedOrder.status === 'delivered'}
+            >
+              Add Line Item
+            </Button>
+            <Button 
+              variant="outline"
+              onClick={() => handleNotifyCustomer(selectedOrder)}
+              disabled={actionLoading === 'notification'}
+            >
+              <Bell className="h-4 w-4 mr-2" />
+              {actionLoading === 'notification' ? 'Sending...' : 'Notify Customer'}
+            </Button>
+            <Button variant="outline">Generate PDF</Button>
+            <Button onClick={() => router.push(`/dashboard/orders/${selectedOrder.id}/edit`)}>Edit Order</Button>
+          </div>
+        </div>
+
+        {/* Order Status Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-slate-600">Status</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col space-y-2">
+                <span className={`inline-flex items-center px-3 py-1 rounded-md text-sm font-medium ${getStatusColor(selectedOrder.status)}`}>
+                  {selectedOrder.status.replace('_', ' ')}
+                </span>
+                {selectedOrder.status !== 'delivered' && (
+                  <select
+                    value={selectedOrder.status}
+                    onChange={(e) => updateOrderStatus(selectedOrder.id, e.target.value as Order['status'])}
+                    className="text-xs border border-stone-200 rounded px-2 py-1"
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="confirmed">Confirmed</option>
+                    <option value="in_production">In Production</option>
+                    <option value="ready_to_ship">Ready to Ship</option>
+                    <option value="shipped">Shipped</option>
+                    <option value="delivered">Delivered</option>
+                  </select>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-slate-600">Line Items</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-heading mb-1">
+                {selectedOrder.line_items.length}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-slate-600">Order Total</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-heading mb-1">
+                {formatCurrency(selectedOrder.total_amount)}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-slate-600">Payment Status</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <span className={`inline-flex items-center px-3 py-1 rounded-md text-sm font-medium ${getPaymentStatusColor(selectedOrder.payment_status)}`}>
+                {selectedOrder.payment_status.replace('_', ' ')}
+              </span>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-slate-600">Delivery Date</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-sm">
+                {selectedOrder.actual_delivery_date 
+                  ? formatDate(selectedOrder.actual_delivery_date)
+                  : selectedOrder.estimated_delivery_date 
+                    ? `Est: ${formatDate(selectedOrder.estimated_delivery_date)}`
+                    : 'TBD'
+                }
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Order Information */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Order Details</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-slate-600">Category</label>
+                  <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs ml-2 ${getCategoryColor(selectedOrder.category)}`}>
+                    {selectedOrder.category.replace('_', ' ')}
+                  </span>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-600">PO Number</label>
+                  <p className="text-heading">{selectedOrder.po_number || '—'}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-600">Created Date</label>
+                  <p className="text-heading">{formatDate(selectedOrder.created_at)}</p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-600">Last Updated</label>
+                  <p className="text-heading">
+                    {selectedOrder.updated_at ? formatDate(selectedOrder.updated_at) : '—'}
+                  </p>
+                </div>
+              </div>
+              {selectedOrder.notes && (
+                <div>
+                  <label className="text-sm font-medium text-slate-600">Internal Notes</label>
+                  <p className="text-heading">{selectedOrder.notes}</p>
+                </div>
+              )}
+              {selectedOrder.client_notes && (
+                <div>
+                  <label className="text-sm font-medium text-slate-600">Client Notes</label>
+                  <p className="text-heading">{selectedOrder.client_notes}</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Payment Breakdown</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex justify-between">
+                <span className="text-slate-600">Subtotal:</span>
+                <span className="font-medium">{formatCurrency(selectedOrder.subtotal)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-600">Tax:</span>
+                <span className="font-medium">{formatCurrency(selectedOrder.tax_amount)}</span>
+              </div>
+              <div className="border-t pt-3">
+                <div className="flex justify-between font-bold">
+                  <span>Total:</span>
+                  <span>{formatCurrency(selectedOrder.total_amount)}</span>
+                </div>
+              </div>
+              <div className="border-t pt-3 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Deposit ({selectedOrder.deposit_percentage}%):</span>
+                  <span className="font-medium">{formatCurrency(selectedOrder.deposit_amount)}</span>
+                </div>
+                {selectedOrder.deposit_paid_date && (
+                  <div className="text-xs text-primary">
+                    Paid: {formatDate(selectedOrder.deposit_paid_date)}
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Balance:</span>
+                  <span className="font-medium">{formatCurrency(selectedOrder.balance_amount)}</span>
+                </div>
+                {selectedOrder.balance_paid_date && (
+                  <div className="text-xs text-primary">
+                    Paid: {formatDate(selectedOrder.balance_paid_date)}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Line Items */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Order Line Items ({selectedOrder.line_items.length})</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {selectedOrder.line_items.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-slate-600 mb-4">No line items added yet</p>
+                <Button onClick={() => setShowLineItemForm(true)}>
+                  Add First Line Item
+                </Button>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Item</TableHead>
+                    <TableHead>Qty</TableHead>
+                    <TableHead>Unit Price</TableHead>
+                    <TableHead>Customizations</TableHead>
+                    <TableHead>Line Total</TableHead>
+                    <TableHead>Production Status</TableHead>
+                    <TableHead>Lead Time</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {selectedOrder.line_items.map((lineItem) => (
+                    <TableRow key={lineItem.id}>
+                      <TableCell>
+                        <div>
+                          <div className="font-medium">{lineItem.item?.name}</div>
+                          <div className="text-sm text-slate-600 font-mono">{lineItem.item?.sku_base}</div>
+                          <div className="text-xs text-slate-600">{lineItem.item?.collection_name}</div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-center font-medium">{lineItem.quantity}</TableCell>
+                      <TableCell>{formatCurrency(lineItem.unit_price)}</TableCell>
+                      <TableCell>
+                        <div className="space-y-1 text-xs">
+                          {lineItem.customizations.fabric && (
+                            <div><span className="font-medium">Fabric:</span> {lineItem.customizations.fabric}</div>
+                          )}
+                          {lineItem.customizations.finish && (
+                            <div><span className="font-medium">Finish:</span> {lineItem.customizations.finish}</div>
+                          )}
+                          {lineItem.customizations.dimensions && (
+                            <div>
+                              <span className="font-medium">Size:</span> {' '}
+                              {lineItem.customizations.dimensions.width && `${lineItem.customizations.dimensions.width}"`}
+                              {lineItem.customizations.dimensions.depth && ` × ${lineItem.customizations.dimensions.depth}"`}
+                              {lineItem.customizations.dimensions.height && ` × ${lineItem.customizations.dimensions.height}"`}
+                            </div>
+                          )}
+                          {lineItem.customizations.notes && (
+                            <div className="text-slate-600">{lineItem.customizations.notes}</div>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-medium">{formatCurrency(lineItem.line_total)}</TableCell>
+                      <TableCell>
+                        <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs ${getProductionStatusColor(lineItem.production_status)}`}>
+                          {lineItem.production_status.replace('_', ' ')}
+                        </span>
+                        {lineItem.production_notes && (
+                          <div className="text-xs text-slate-600 mt-1">{lineItem.production_notes}</div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm">{lineItem.lead_time_days} days</div>
+                        {lineItem.estimated_completion && (
+                          <div className="text-xs text-slate-600">
+                            Est: {formatDate(lineItem.estimated_completion)}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleEditLineItem(lineItem)}
+                            disabled={actionLoading === `edit-${lineItem.id}`}
+                          >
+                            <Edit className="h-4 w-4 mr-1" />
+                            {actionLoading === `edit-${lineItem.id}` ? 'Editing...' : 'Edit'}
+                          </Button>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => handleRemoveLineItem(lineItem.id)}
+                            disabled={actionLoading === `remove-${lineItem.id}`}
+                          >
+                            <Trash2 className="h-4 w-4 mr-1" />
+                            {actionLoading === `remove-${lineItem.id}` ? 'Removing...' : 'Remove'}
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Add Line Item Form */}
+        {showLineItemForm && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Add Line Item</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleAddLineItem} className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-heading mb-1">Item *</label>
+                    <select
+                      value={lineItemFormData.item_id}
+                      onChange={(e) => {
+                        const selectedItem = items.find(i => i.id === e.target.value)
+                        setLineItemFormData({ 
+                          ...lineItemFormData, 
+                          item_id: e.target.value,
+                          unit_price: selectedItem ? selectedItem.base_price.toString() : '',
+                          lead_time_days: selectedItem ? selectedItem.lead_time_days : 30
+                        })
+                      }}
+                      required
+                      className="w-full px-3 py-2 border border-stone-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    >
+                      <option value="">Select an item</option>
+                      {items.map(item => (
+                        <option key={item.id} value={item.id}>
+                          {item.name} ({item.sku_base}) - {formatCurrency(item.base_price)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-heading mb-1">Quantity *</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={lineItemFormData.quantity}
+                      onChange={(e) => setLineItemFormData({ ...lineItemFormData, quantity: parseInt(e.target.value) })}
+                      required
+                      className="w-full px-3 py-2 border border-stone-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-heading mb-1">Unit Price *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={lineItemFormData.unit_price}
+                      onChange={(e) => setLineItemFormData({ ...lineItemFormData, unit_price: e.target.value })}
+                      required
+                      className="w-full px-3 py-2 border border-stone-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-heading mb-1">Lead Time (days)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={lineItemFormData.lead_time_days}
+                      onChange={(e) => setLineItemFormData({ ...lineItemFormData, lead_time_days: parseInt(e.target.value) })}
+                      className="w-full px-3 py-2 border border-stone-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    />
+                  </div>
+                </div>
+
+                <div className="border-t pt-4">
+                  <h3 className="text-lg font-medium text-heading mb-4">Customizations</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-heading mb-1">Fabric</label>
+                      <input
+                        type="text"
+                        value={lineItemFormData.customizations.fabric}
+                        onChange={(e) => setLineItemFormData({ 
+                          ...lineItemFormData, 
+                          customizations: { ...lineItemFormData.customizations, fabric: e.target.value }
+                        })}
+                        className="w-full px-3 py-2 border border-stone-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-heading mb-1">Finish</label>
+                      <input
+                        type="text"
+                        value={lineItemFormData.customizations.finish}
+                        onChange={(e) => setLineItemFormData({ 
+                          ...lineItemFormData, 
+                          customizations: { ...lineItemFormData.customizations, finish: e.target.value }
+                        })}
+                        className="w-full px-3 py-2 border border-stone-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-heading mb-1">Custom Width</label>
+                      <input
+                        type="number"
+                        step="0.25"
+                        value={lineItemFormData.customizations.width}
+                        onChange={(e) => setLineItemFormData({ 
+                          ...lineItemFormData, 
+                          customizations: { ...lineItemFormData.customizations, width: e.target.value }
+                        })}
+                        className="w-full px-3 py-2 border border-stone-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-heading mb-1">Custom Depth</label>
+                      <input
+                        type="number"
+                        step="0.25"
+                        value={lineItemFormData.customizations.depth}
+                        onChange={(e) => setLineItemFormData({ 
+                          ...lineItemFormData, 
+                          customizations: { ...lineItemFormData.customizations, depth: e.target.value }
+                        })}
+                        className="w-full px-3 py-2 border border-stone-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                      />
+                    </div>
+
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-heading mb-1">Customization Notes</label>
+                      <textarea
+                        value={lineItemFormData.customizations.notes}
+                        onChange={(e) => setLineItemFormData({ 
+                          ...lineItemFormData, 
+                          customizations: { ...lineItemFormData.customizations, notes: e.target.value }
+                        })}
+                        rows={3}
+                        className="w-full px-3 py-2 border border-stone-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        placeholder="Special instructions or customization details"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <Button type="submit" disabled={actionLoading !== null}>
+                    {actionLoading === 'add_line_item' ? 'Adding...' : 'Add Line Item'}
+                  </Button>
+                  <Button 
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowLineItemForm(false)}
+                    disabled={actionLoading !== null}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <PageHeader 
+        title="Orders"
+        description="Manage order fulfillment from confirmation to delivery"
+        actions={
+          <>
+            <Button 
+              onClick={fetchOrders} 
+              disabled={loading}
+              variant="outline"
+            >
+              {loading ? 'Refreshing...' : 'Refresh'}
+            </Button>
+          </>
+        }
+      />
+
+      {error && (
+        <div className="bg-amber-50 border border-amber-200 rounded-md p-4">
+          <div className="text-amber-800 text-sm">
+            <strong>Error:</strong> {error}
+          </div>
+        </div>
+      )}
+
+      {success && (
+        <div className="bg-primary/10 border border-primary/20 rounded-md p-4">
+          <div className="text-primary text-sm">
+            <strong>Success:</strong> {success}
+          </div>
+        </div>
+      )}
+
+      {/* Create Order Form */}
+      {showCreateForm && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Create New Order</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleCreateOrder} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-heading mb-1">Project *</label>
+                  <select
+                    value={orderFormData.project_id}
+                    onChange={(e) => setOrderFormData({ ...orderFormData, project_id: e.target.value })}
+                    required
+                    className="w-full px-3 py-2 border border-stone-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  >
+                    <option value="">Select a project</option>
+                    {projects.map((project, index) => (
+                      <option key={`create-proj-${index}`} value={project.id || ''}>
+                        {project.name || 'Unnamed Project'} - {project.client_name || 'No Client'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-heading mb-1">Category *</label>
+                  <select
+                    value={orderFormData.category}
+                    onChange={(e) => setOrderFormData({ ...orderFormData, category: e.target.value as any })}
+                    required
+                    className="w-full px-3 py-2 border border-stone-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  >
+                    <option value="furniture">Furniture</option>
+                    <option value="decking">Decking</option>
+                    <option value="cladding">Cladding</option>
+                    <option value="fixtures">Fixtures</option>
+                    <option value="custom_millwork">Custom Millwork</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-heading mb-1">PO Number</label>
+                  <input
+                    type="text"
+                    value={orderFormData.po_number}
+                    onChange={(e) => setOrderFormData({ ...orderFormData, po_number: e.target.value })}
+                    className="w-full px-3 py-2 border border-stone-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    placeholder="Purchase Order Number"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-heading mb-1">Est. Delivery Date</label>
+                  <input
+                    type="date"
+                    value={orderFormData.estimated_delivery_date}
+                    onChange={(e) => setOrderFormData({ ...orderFormData, estimated_delivery_date: e.target.value })}
+                    className="w-full px-3 py-2 border border-stone-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-heading mb-1">Internal Notes</label>
+                <textarea
+                  value={orderFormData.notes}
+                  onChange={(e) => setOrderFormData({ ...orderFormData, notes: e.target.value })}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-stone-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  placeholder="Internal notes and specifications"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-heading mb-1">Client Notes</label>
+                <textarea
+                  value={orderFormData.client_notes}
+                  onChange={(e) => setOrderFormData({ ...orderFormData, client_notes: e.target.value })}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-stone-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  placeholder="Special delivery instructions, client requirements"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <Button type="submit" disabled={actionLoading !== null}>
+                  {actionLoading === 'create' ? 'Creating...' : 'Create Order'}
+                </Button>
+                <Button 
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowCreateForm(false)}
+                  disabled={actionLoading !== null}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Filters */}
+      <OrdersFilters
+        statusFilter={statusFilter}
+        categoryFilter={categoryFilter}
+        projectFilter={projectFilter}
+        projects={projects}
+        onStatusChange={(value) => dispatch({ type: 'SET_STATUS_FILTER', payload: value })}
+        onCategoryChange={(value) => dispatch({ type: 'SET_CATEGORY_FILTER', payload: value })}
+        onProjectChange={(value) => dispatch({ type: 'SET_PROJECT_FILTER', payload: value })}
+      />
+
+      {/* Orders Summary Cards */}
+      <OrdersStats 
+        orders={filteredOrders}
+        formatCurrency={formatCurrency}
+      />
+
+      {/* Orders Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle>All Orders ({filteredOrders.length})</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="text-center py-12">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
+              <div className="text-slate-600">Loading orders...</div>
+            </div>
+          ) : filteredOrders.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="text-slate-600 mb-4">No orders found</div>
+              <Button onClick={() => setShowCreateForm(true)}>
+                Create Your First Order
+              </Button>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Order Number</TableHead>
+                  <TableHead>Project</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Line Items</TableHead>
+                  <TableHead>Total</TableHead>
+                  <TableHead>Payment</TableHead>
+                  <TableHead>Delivery</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredOrders.map((order) => (
+                  <TableRow key={order.id}>
+                    <TableCell>
+                      <div>
+                        <div className="font-medium text-heading">{order.order_number}</div>
+                        <div className="text-sm text-slate-600">{order.po_number}</div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div>
+                        <div className="font-medium">{order.project?.name}</div>
+                        <div className="text-sm text-slate-600">{order.project?.client_name}</div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs ${getCategoryColor(order.category)}`}>
+                        {order.category.replace('_', ' ')}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs ${getStatusColor(order.status)}`}>
+                        {order.status.replace('_', ' ')}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {order.line_items.length}
+                    </TableCell>
+                    <TableCell className="font-medium">{formatCurrency(order.total_amount)}</TableCell>
+                    <TableCell>
+                      <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs ${getPaymentStatusColor(order.payment_status)}`}>
+                        {order.payment_status.replace('_', ' ')}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm">
+                        {order.actual_delivery_date 
+                          ? formatDate(order.actual_delivery_date)
+                          : order.estimated_delivery_date 
+                            ? `Est: ${formatDate(order.estimated_delivery_date)}`
+                            : 'TBD'
+                        }
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => viewOrderDetails(order)}
+                        >
+                          View
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => router.push(`/dashboard/orders/${order.id}/edit`)}
+                        >
+                          Edit
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Line Item Edit Dialog */}
+      <Dialog open={showEditLineItemDialog} onOpenChange={setShowEditLineItemDialog}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Line Item</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="quantity" className="text-right">
+                Quantity
+              </Label>
+              <Input
+                id="quantity"
+                type="number"
+                value={editLineItemFormData.quantity || ''}
+                onChange={(e) => setEditLineItemFormData({
+                  ...editLineItemFormData,
+                  quantity: parseInt(e.target.value) || 0
+                })}
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="unit_price" className="text-right">
+                Unit Price
+              </Label>
+              <Input
+                id="unit_price"
+                type="number"
+                step="0.01"
+                value={editLineItemFormData.unit_price || ''}
+                onChange={(e) => setEditLineItemFormData({
+                  ...editLineItemFormData,
+                  unit_price: parseFloat(e.target.value) || 0
+                })}
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="production_status" className="text-right">
+                Status
+              </Label>
+              <Select
+                value={editLineItemFormData.production_status || ''}
+                onValueChange={(value) => setEditLineItemFormData({
+                  ...editLineItemFormData,
+                  production_status: value as OrderLineItem['production_status']
+                })}
+              >
+                <SelectTrigger className="col-span-3">
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="in_production">In Production</SelectItem>
+                  <SelectItem value="quality_check">Quality Check</SelectItem>
+                  <SelectItem value="ready">Ready</SelectItem>
+                  <SelectItem value="shipped">Shipped</SelectItem>
+                  <SelectItem value="delivered">Delivered</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="lead_time_days" className="text-right">
+                Lead Time (Days)
+              </Label>
+              <Input
+                id="lead_time_days"
+                type="number"
+                value={editLineItemFormData.lead_time_days || ''}
+                onChange={(e) => setEditLineItemFormData({
+                  ...editLineItemFormData,
+                  lead_time_days: parseInt(e.target.value) || 0
+                })}
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="production_notes" className="text-right">
+                Notes
+              </Label>
+              <Textarea
+                id="production_notes"
+                value={editLineItemFormData.production_notes || ''}
+                onChange={(e) => setEditLineItemFormData({
+                  ...editLineItemFormData,
+                  production_notes: e.target.value
+                })}
+                className="col-span-3"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowEditLineItemDialog(false)
+                setEditingLineItem(null)
+                setEditLineItemFormData({})
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveLineItem}>
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Customer Notification Dialog */}
+      <Dialog open={showNotificationDialog} onOpenChange={setShowNotificationDialog}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              Notify Customer - Order #{notificationOrder?.order_number}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="message" className="text-right">
+                Message
+              </Label>
+              <Textarea
+                id="message"
+                value={notificationMessage}
+                onChange={(e) => setNotificationMessage(e.target.value)}
+                placeholder="Enter notification message for customer..."
+                className="col-span-3"
+                rows={4}
+              />
+            </div>
+            <div className="col-span-4 text-sm text-slate-600">
+              This notification will be sent to {notificationOrder?.project?.client_name}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowNotificationDialog(false)
+                setNotificationMessage('')
+                setNotificationOrder(null)
+              }}
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={sendNotification}
+              disabled={!notificationMessage.trim() || actionLoading === 'notification'}
+            >
+              {actionLoading === 'notification' ? 'Sending...' : 'Send Notification'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}

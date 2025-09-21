@@ -1,0 +1,227 @@
+'use client'
+
+import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { CheckCircle, AlertCircle, Database, Loader2 } from 'lucide-react'
+import { hasProperty, safeArrayAccess } from '@/lib/utils/bulk-type-fixes'
+
+interface DeploymentResult {
+  success: boolean
+  message?: string
+  error?: string
+  details?: unknown
+  results?: unknown[]
+  totalStatements?: number
+}
+
+interface ExecutionResult {
+  success: boolean
+  statement: string
+  error?: string
+}
+
+export default function Phase3DeploymentPage() {
+  const [isDeploying, setIsDeploying] = useState(false)
+  const [deploymentResult, setDeploymentResult] = useState<DeploymentResult | null>(null)
+
+  const deployPhase3Schema = async () => {
+    setIsDeploying(true)
+    setDeploymentResult(null)
+    
+    try {
+      const response = await fetch('/api/admin/deploy-phase3', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+      
+      const result: DeploymentResult = await response.json()
+      setDeploymentResult(result)
+      
+    } catch (error) {
+      setDeploymentResult({
+        success: false,
+        error: 'Failed to deploy Phase 3 schema',
+        details: String(error)
+      })
+    } finally {
+      setIsDeploying(false)
+    }
+  }
+
+  return (
+    <div className="container mx-auto py-6">
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div className="flex items-center gap-2 mb-6">
+          <Database className="h-8 w-8 text-primary" />
+          <h1 className="text-3xl font-bold">Phase 3 Database Deployment</h1>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Deploy Phase 3 Enterprise Features</CardTitle>
+            <CardDescription>
+              Deploy the comprehensive Phase 3 database schema including multi-tenancy, 
+              advanced analytics, AI/ML features, communication system, and more.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <h3 className="font-semibold mb-2">Phase 3 Features:</h3>
+                <ul className="text-sm space-y-1 text-muted-foreground">
+                  <li>• Multi-tenant architecture</li>
+                  <li>• Advanced analytics & BI</li>
+                  <li>• AI/ML prediction services</li>
+                  <li>• Real-time communication</li>
+                  <li>• Advanced inventory management</li>
+                  <li>• Financial management expansion</li>
+                  <li>• API & integration platform</li>
+                  <li>• Comprehensive audit system</li>
+                </ul>
+              </div>
+              <div>
+                <h3 className="font-semibold mb-2">Database Changes:</h3>
+                <ul className="text-sm space-y-1 text-muted-foreground">
+                  <li>• 22 new enterprise tables</li>
+                  <li>• Row Level Security policies</li>
+                  <li>• Performance indexes</li>
+                  <li>• Audit logging functions</li>
+                  <li>• Sample data insertion</li>
+                </ul>
+              </div>
+            </div>
+            
+            <div className="flex gap-4">
+              <Button 
+                onClick={deployPhase3Schema} 
+                disabled={isDeploying}
+                size="lg"
+              >
+                {isDeploying ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Deploying Phase 3...
+                  </>
+                ) : (
+                  <>
+                    <Database className="mr-2 h-4 w-4" />
+                    Deploy Phase 3 Schema
+                  </>
+                )}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {deploymentResult && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                {deploymentResult.success ? (
+                  <CheckCircle className="h-5 w-5 text-green-500" />
+                ) : (
+                  <AlertCircle className="h-5 w-5 text-red-500" />
+                )}
+                Deployment {deploymentResult.success ? 'Successful' : 'Failed'}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {deploymentResult.success ? (
+                <div className="space-y-4">
+                  <Alert>
+                    <CheckCircle className="h-4 w-4" />
+                    <AlertDescription>
+                      {deploymentResult.message}
+                    </AlertDescription>
+                  </Alert>
+                  
+                  {deploymentResult.totalStatements && (
+                    <div className="text-sm text-muted-foreground">
+                      Executed {deploymentResult.totalStatements} SQL statements
+                    </div>
+                  )}
+                  
+                  {deploymentResult.results && (
+                    <div className="space-y-2">
+                      <h4 className="font-semibold">Execution Results:</h4>
+                      <div className="max-h-60 overflow-y-auto space-y-1 text-sm">
+                        {safeArrayAccess<ExecutionResult>(deploymentResult.results).map((result, index) => {
+                          const isValidResult = hasProperty(result, 'success') && hasProperty(result, 'statement')
+                          const success = isValidResult ? Boolean(result.success) : false
+                          const statement = isValidResult ? String(result.statement || '') : 'Unknown statement'
+                          const error = hasProperty(result, 'error') ? String(result.error || '') : undefined
+                          
+                          return (
+                            <div key={index} className={`p-2 rounded ${success ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+                              <div className="font-mono text-xs">
+                                {statement}...
+                              </div>
+                              {error && (
+                                <div className="text-xs mt-1">
+                                  Error: {error}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <Alert variant="error">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>
+                      {deploymentResult.error}
+                    </AlertDescription>
+                  </Alert>
+                  
+                  {deploymentResult.details ? (
+                    <div className="text-sm">
+                      <h4 className="font-semibold">Details:</h4>
+                      <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto">
+                        {(() => {
+                          const details = deploymentResult.details
+                          if (typeof details === 'string') {
+                            return details
+                          }
+                          if (details != null) {
+                            return JSON.stringify(details, null, 2)
+                          }
+                          return 'No details available'
+                        })()}
+                      </pre>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Post-Deployment Steps</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-sm space-y-2">
+              <p>After successful deployment, you should:</p>
+              <ul className="list-disc list-inside space-y-1 text-muted-foreground ml-4">
+                <li>Verify all tables were created successfully</li>
+                <li>Test RLS policies are working correctly</li>
+                <li>Check indexes are created for performance</li>
+                <li>Validate sample data was inserted</li>
+                <li>Begin implementing Phase 3 application features</li>
+              </ul>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}

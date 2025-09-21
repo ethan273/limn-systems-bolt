@@ -1,0 +1,259 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+'use client'
+
+import { useState, useEffect } from 'react'
+import { PageWrapper } from '@/components/layouts/page-wrapper'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { SimpleChart } from '@/components/charts/simple-chart'
+import { 
+  getDashboardMetrics, 
+  getRevenueOverTime, 
+  getOrderStatusDistribution,
+  formatCurrency,
+  exportToCSV 
+} from '@/lib/data-helpers'
+import { safeGet, hasProperty } from '@/lib/utils/bulk-type-fixes'
+import { 
+  PaymentStatusWidget,
+  SMSPerformanceWidget
+} from '@/components/dashboard/widgets'
+import { RefreshCw, Download } from 'lucide-react'
+
+interface AnalyticsMetrics {
+  revenue: number
+  orders: number
+  production: number  
+  customers: number
+  collections: number
+}
+
+export default function AnalyticsPage() {
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [metrics, setMetrics] = useState<AnalyticsMetrics>({
+    revenue: 0,
+    orders: 0,
+    production: 0,
+    customers: 0,
+    collections: 0
+  })
+  const [revenueData, setRevenueData] = useState<unknown[]>([])
+  const [orderStatusData, setOrderStatusData] = useState<unknown[]>([])
+  const [refreshing, setRefreshing] = useState(false)
+
+  useEffect(() => {
+    loadAnalyticsData()
+  }, [])
+
+  const loadAnalyticsData = async () => {
+    try {
+      setLoading(true)
+      
+      const [dashboardMetrics, collectionsResponse, revenueOverTime, orderStatus] = await Promise.all([
+        getDashboardMetrics(),
+        fetch('/api/collections', { credentials: 'include' }),
+        getRevenueOverTime('30d'),
+        getOrderStatusDistribution()
+      ])
+      
+      let collectionsCount = 0
+      if (collectionsResponse.ok) {
+        const collectionsData = await collectionsResponse.json()
+        collectionsCount = collectionsData.data?.length || 0
+      }
+      
+      setMetrics({
+        ...dashboardMetrics,
+        collections: collectionsCount
+      })
+      
+      setRevenueData(revenueOverTime)
+      setOrderStatusData(orderStatus)
+      setError('')
+    } catch (err) {
+      console.error('Error loading analytics data:', err)
+      setError('Failed to load analytics data')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const refreshAnalytics = async () => {
+    setRefreshing(true)
+    await loadAnalyticsData()
+    setRefreshing(false)
+  }
+
+  const exportAnalyticsData = () => {
+    const exportData = [
+      { metric: 'Total Revenue', value: metrics.revenue },
+      { metric: 'Active Orders', value: metrics.orders },
+      { metric: 'Production Queue', value: metrics.production },
+      { metric: 'Total Customers', value: metrics.customers },
+      { metric: 'Collections', value: metrics.collections }
+    ]
+    exportToCSV(exportData, 'analytics_metrics')
+  }
+
+  if (loading) {
+    return (
+      <PageWrapper title="Analytics Dashboard">
+        <div className="flex items-center justify-center py-12">
+          <div>Loading...</div>
+        </div>
+      </PageWrapper>
+    )
+  }
+
+  return (
+    <PageWrapper
+      title="Analytics Dashboard"
+      description="Business intelligence and performance metrics"
+    >
+      {/* Header Actions */}
+      <div className="flex items-center justify-between -mt-4 mb-6">
+        <div></div>
+        <div className="flex space-x-2">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={exportAnalyticsData}
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Export Data
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={refreshAnalytics}
+            disabled={refreshing}
+          >
+            <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </Button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-red-800">{error}</p>
+        </div>
+      )}
+
+      {/* Key Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 md:gap-6 mb-8">
+        <Card>
+          <CardHeader>
+            <CardTitle>Total Revenue</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{formatCurrency(metrics.revenue)}</div>
+            <p className="text-sm text-gray-600">All time revenue</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Active Orders</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{metrics.orders}</div>
+            <p className="text-sm text-gray-600">Orders in progress</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Production Queue</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{metrics.production}</div>
+            <p className="text-sm text-gray-600">Items in production</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Total Customers</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{metrics.customers}</div>
+            <p className="text-sm text-gray-600">Active customers</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Collections</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{metrics.collections}</div>
+            <p className="text-sm text-gray-600">Product collections</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 mb-8">
+        <Card>
+          <CardHeader>
+            <CardTitle>Revenue Over Time (30 Days)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <SimpleChart
+              data={revenueData.map(item => ({
+                label: safeGet<string>(item, ['date']) || 'Unknown',
+                value: safeGet<number>(item, ['revenue']) || 0,
+                target: undefined
+              }))}
+              type="line"
+              title="Revenue Trend"
+              height={300}
+              valueFormatter={(value) => formatCurrency(value)}
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Order Status Distribution</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <SimpleChart
+              data={orderStatusData.map(item => ({
+                label: safeGet<string>(item, ['status']) || 'Unknown',
+                value: safeGet<number>(item, ['count']) || 0,
+                target: undefined
+              }))}
+              type="bar"
+              title="Order Distribution"
+              height={300}
+              valueFormatter={(value) => `${value} orders`}
+            />
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Phase 2 Widgets */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <PaymentStatusWidget />
+        <SMSPerformanceWidget />
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>System Status</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-green-600 font-medium">
+            Analytics system is operational - Phase 2 Features Active
+          </div>
+          <p className="text-sm text-gray-600 mt-2">
+            QuickBooks payments, SMS notifications, and automation are integrated
+          </p>
+        </CardContent>
+      </Card>
+    </PageWrapper>
+  )
+}

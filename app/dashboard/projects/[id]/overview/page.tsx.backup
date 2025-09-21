@@ -1,0 +1,453 @@
+'use client'
+ 
+
+import { useState } from 'react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { 
+  ArrowLeft,
+  Calendar,
+  DollarSign,
+  User,
+  Building,
+  FileText,
+  Package,
+  CheckCircle,
+  Clock,
+  Edit,
+  ExternalLink
+} from 'lucide-react'
+import { safeFormatString } from '@/lib/utils/string-helpers'
+import Link from 'next/link'
+
+interface UnifiedProject {
+  // Project basics
+  id: string
+  project_name: string
+  project_code: string
+  priority: 'urgent' | 'high' | 'normal' | 'low'
+  target_launch_date: string
+  created_at: string
+  
+  // Design info
+  design_stage?: string
+  designer_name?: string
+  designer_email?: string
+  brief_title?: string
+  deliverable_count?: number
+  revision_count?: number
+  
+  // Manufacturing info
+  manufacturer_name?: string
+  manufacturer_email?: string
+  manufacturing_status?: string
+  production_progress?: number
+  milestone_count?: number
+  completed_milestones?: number
+  
+  // Financial info
+  estimated_value?: number
+  actual_costs?: number
+  invoice_status?: string
+  margin_percent?: number
+  
+  // Timeline
+  design_started?: string
+  prototype_started?: string
+  manufacturing_started?: string
+  shipped_date?: string
+  invoice_date?: string
+}
+
+export default function UnifiedProjectOverviewPage() {
+  const [project] = useState<UnifiedProject | null>(null)
+  const [loading] = useState(true)
+
+
+  if (loading) {
+    return <div className="p-6">Loading project overview...</div>
+  }
+
+  if (!project) {
+    return <div className="p-6">Project not found</div>
+  }
+
+  const getPriorityColor = (priority: string) => {
+    const colors = {
+      urgent: 'bg-red-500',
+      high: 'bg-orange-500',
+      normal: 'bg-blue-500',
+      low: 'bg-gray-400'
+    }
+    return colors[priority as keyof typeof colors] || colors.normal
+  }
+
+  const getStageColor = (stage?: string) => {
+    if (!stage) return 'bg-gray-100 text-gray-800'
+    
+    const colors: Record<string, string> = {
+      'brief_creation': 'bg-blue-100 text-blue-800',
+      'designer_review': 'bg-purple-100 text-purple-800',
+      'initial_concepts': 'bg-yellow-100 text-yellow-800',
+      'approved_for_prototype': 'bg-green-100 text-green-800',
+      'quote_requested': 'bg-blue-100 text-blue-800',
+      'in_production': 'bg-orange-100 text-orange-800',
+      'quality_review': 'bg-purple-100 text-purple-800',
+      'shipped': 'bg-green-100 text-green-800'
+    }
+    return colors[stage] || 'bg-gray-100 text-gray-800'
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-4">
+          <Link href="/dashboard/pipeline">
+            <Button variant="outline" size="sm">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Pipeline
+            </Button>
+          </Link>
+          <div>
+            <div className="flex items-center space-x-3">
+              <h1 className="text-2xl font-bold">{project.project_name}</h1>
+              <div className={`w-3 h-3 rounded-full ${getPriorityColor(project.priority)}`} />
+              <Badge variant="outline">{project.project_code}</Badge>
+            </div>
+            <p className="text-gray-700">{project.brief_title}</p>
+          </div>
+        </div>
+        <div className="flex space-x-2">
+          <Button variant="outline">
+            <Edit className="h-4 w-4 mr-2" />
+            Edit Project
+          </Button>
+          <Button>
+            <ExternalLink className="h-4 w-4 mr-2" />
+            View Details
+          </Button>
+        </div>
+      </div>
+
+      {/* Project Status Cards */}
+      <div className="grid grid-cols-5 gap-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Design Status</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Badge className={getStageColor(project.design_stage)}>
+              {safeFormatString(project.design_stage, 'Not Started')}
+            </Badge>
+            <div className="text-sm text-gray-700 mt-1">
+              {project.deliverable_count} deliverables • {project.revision_count} revisions
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Manufacturing</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Badge className={getStageColor(project.manufacturing_status)}>
+              {safeFormatString(project.manufacturing_status, 'Not Started')}
+            </Badge>
+            <div className="mt-2">
+              <div className="w-full bg-gray-200 rounded-full h-1">
+                <div className="bg-blue-600 h-1 rounded-full transition-all duration-300" style={{ width: `${project.production_progress || 0}%` }}></div>
+              </div>
+              <div className="text-sm text-gray-700 mt-1">
+                {project.completed_milestones}/{project.milestone_count} milestones
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Financial</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-lg font-bold">${project.estimated_value?.toLocaleString()}</div>
+            <div className="text-sm text-green-600">
+              {project.margin_percent?.toFixed(1)}% margin
+            </div>
+            <Badge variant="outline" className="text-xs mt-1">
+              {project.invoice_status || 'Not Invoiced'}
+            </Badge>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Timeline</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-sm space-y-1">
+              <div className="flex items-center">
+                <Calendar className="h-3 w-3 mr-1" />
+                Target: {new Date(project.target_launch_date).toLocaleDateString()}
+              </div>
+              <div className="text-gray-700">
+                Started: {new Date(project.created_at).toLocaleDateString()}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Team</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2 text-sm">
+              {project.designer_name && (
+                <div className="flex items-center">
+                  <User className="h-3 w-3 mr-1" />
+                  {project.designer_name}
+                </div>
+              )}
+              {project.manufacturer_name && (
+                <div className="flex items-center">
+                  <Building className="h-3 w-3 mr-1" />
+                  {project.manufacturer_name}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Tabs defaultValue="timeline">
+        <TabsList>
+          <TabsTrigger value="timeline">Timeline</TabsTrigger>
+          <TabsTrigger value="design">Design Details</TabsTrigger>
+          <TabsTrigger value="manufacturing">Manufacturing</TabsTrigger>
+          <TabsTrigger value="financials">Financials</TabsTrigger>
+          <TabsTrigger value="documents">Documents</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="timeline" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Project Timeline</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="flex items-center space-x-4">
+                  <div className="flex-shrink-0">
+                    <CheckCircle className="h-6 w-6 text-green-600" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-medium">Design Phase Started</div>
+                    <div className="text-sm text-gray-700">
+                      {project.design_started && new Date(project.design_started).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <Badge className="bg-green-100 text-green-800">Completed</Badge>
+                </div>
+
+                <div className="flex items-center space-x-4">
+                  <div className="flex-shrink-0">
+                    <CheckCircle className="h-6 w-6 text-green-600" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-medium">Prototype Phase Started</div>
+                    <div className="text-sm text-gray-700">
+                      {project.prototype_started && new Date(project.prototype_started).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <Badge className="bg-green-100 text-green-800">Completed</Badge>
+                </div>
+
+                <div className="flex items-center space-x-4">
+                  <div className="flex-shrink-0">
+                    <Clock className="h-6 w-6 text-blue-600" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-medium">Manufacturing in Progress</div>
+                    <div className="text-sm text-gray-700">
+                      {project.manufacturing_started && new Date(project.manufacturing_started).toLocaleDateString()}
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
+                      <div className="bg-blue-600 h-2 rounded-full transition-all duration-300" style={{ width: `${project.production_progress || 0}%` }}></div>
+                    </div>
+                  </div>
+                  <Badge className="bg-blue-100 text-blue-800">In Progress</Badge>
+                </div>
+
+                <div className="flex items-center space-x-4">
+                  <div className="flex-shrink-0">
+                    <Clock className="h-6 w-6 text-gray-400" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-medium text-gray-700">Shipping</div>
+                    <div className="text-sm text-gray-400">Pending manufacturing completion</div>
+                  </div>
+                  <Badge variant="outline">Pending</Badge>
+                </div>
+
+                <div className="flex items-center space-x-4">
+                  <div className="flex-shrink-0">
+                    <Clock className="h-6 w-6 text-gray-400" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-medium text-gray-700">Invoicing & Payment</div>
+                    <div className="text-sm text-gray-400">Pending delivery</div>
+                  </div>
+                  <Badge variant="outline">Pending</Badge>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="design">
+          <Card>
+            <CardHeader>
+              <CardTitle>Design Information</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">Designer</div>
+                    <div className="text-sm text-gray-700">{project.designer_name}</div>
+                    <div className="text-xs text-gray-600">{project.designer_email}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">Current Stage</div>
+                    <Badge className={getStageColor(project.design_stage)}>
+                      {safeFormatString(project.design_stage, 'concept')}
+                    </Badge>
+                  </div>
+                </div>
+                
+                <div className="flex space-x-4">
+                  <Link href={`/dashboard/design-projects/${project.id}`}>
+                    <Button variant="outline">
+                      <FileText className="h-4 w-4 mr-2" />
+                      View Design Details
+                    </Button>
+                  </Link>
+                  <Link href={`/dashboard/design-briefs`}>
+                    <Button variant="outline">
+                      <FileText className="h-4 w-4 mr-2" />
+                      View Brief
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="manufacturing">
+          <Card>
+            <CardHeader>
+              <CardTitle>Manufacturing Status</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">Manufacturer</div>
+                    <div className="text-sm text-gray-700">{project.manufacturer_name}</div>
+                    <div className="text-xs text-gray-600">{project.manufacturer_email}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">Production Progress</div>
+                    <div className="space-y-1">
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div className="bg-blue-600 h-2 rounded-full transition-all duration-300" style={{ width: `${project.production_progress || 0}%` }}></div>
+                      </div>
+                      <div className="text-sm text-gray-700">
+                        {project.production_progress}% complete
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex space-x-4">
+                  <Link href={`/dashboard/manufacturers/projects/${project.id}`}>
+                    <Button variant="outline">
+                      <Package className="h-4 w-4 mr-2" />
+                      View Manufacturing Details
+                    </Button>
+                  </Link>
+                  <Link href={`/dashboard/manufacturers/projects/${project.id}/milestones`}>
+                    <Button variant="outline">
+                      <Clock className="h-4 w-4 mr-2" />
+                      View Milestones
+                    </Button>
+                  </Link>
+                  <Link href={`/dashboard/manufacturers/projects/${project.id}/materials`}>
+                    <Button variant="outline">
+                      <Package className="h-4 w-4 mr-2" />
+                      View Materials
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="financials">
+          <Card>
+            <CardHeader>
+              <CardTitle>Financial Summary</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">Estimated Value</div>
+                    <div className="text-2xl font-bold">${project.estimated_value?.toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">Actual Costs</div>
+                    <div className="text-2xl font-bold text-red-600">${project.actual_costs?.toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">Projected Margin</div>
+                    <div className="text-2xl font-bold text-green-600">{project.margin_percent?.toFixed(1)}%</div>
+                  </div>
+                </div>
+                
+                <div className="flex space-x-4">
+                  <Link href="/dashboard/finance">
+                    <Button variant="outline">
+                      <DollarSign className="h-4 w-4 mr-2" />
+                      View Financial Dashboard
+                    </Button>
+                  </Link>
+                  <Button>
+                    <FileText className="h-4 w-4 mr-2" />
+                    Create Invoice
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="documents">
+          <Card>
+            <CardHeader>
+              <CardTitle>Project Documents</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-center py-8 text-gray-600">
+                Document management will be available here
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}

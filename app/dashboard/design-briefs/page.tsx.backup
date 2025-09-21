@@ -1,0 +1,431 @@
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+// useRouter import removed - not used
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+// Textarea import removed - not used
+import { Plus, Search, Calendar, User, FileText, AlertCircle, Edit, Eye, CheckCircle2, Clock } from 'lucide-react'
+import { DesignBrief } from '@/types/designer'
+import Link from 'next/link'
+import { toast } from 'sonner'
+import DesignBriefEditModal from '@/components/design/DesignBriefEditModal'
+
+interface DesignBriefWithProject extends DesignBrief {
+  project_name?: string
+  project_code?: string
+  project_priority?: string
+  designer_name?: string
+}
+
+
+const getPriorityColor = (priority: string) => {
+  const colors: Record<string, string> = {
+    'urgent': 'bg-red-500 text-white',
+    'high': 'bg-orange-500 text-white',
+    'normal': 'bg-blue-500 text-white',
+    'low': 'bg-gray-400 text-white'
+  }
+  return colors[priority] || 'bg-gray-400 text-white'
+}
+
+const getBriefStatus = (brief: DesignBriefWithProject) => {
+  if (brief.approved_date) return 'approved'
+  return 'draft'
+}
+
+const getBriefStatusColor = (status: string) => {
+  const colors: Record<string, string> = {
+    'draft': 'bg-yellow-100 text-yellow-800',
+    'approved': 'bg-green-100 text-green-800',
+    'rejected': 'bg-red-100 text-red-800'
+  }
+  return colors[status] || 'bg-gray-100 text-gray-800'
+}
+
+export default function DesignBriefsPage() {
+  // Router removed - not used in current implementation
+  const [briefs, setBriefs] = useState<DesignBriefWithProject[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [searchTerm, setSearchTerm] = useState('')
+  const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [priorityFilter, setPriorityFilter] = useState<string>('all')
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editingBrief, setEditingBrief] = useState<DesignBriefWithProject | null>(null)
+
+  const loadBriefs = useCallback(async () => {
+    setLoading(true)
+    try {
+      // Fetch real design briefs data from API
+      const response = await fetch('/api/design-briefs', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include'
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        if (result.success && Array.isArray(result.data)) {
+          setBriefs(result.data)
+          setError('')
+          console.log(`Loaded ${result.data.length} design briefs from API`)
+          return
+        }
+      }
+
+      // If API fails or returns no data, set empty array with helpful error message
+      console.log('Design Briefs API returned no data or failed - check if design_briefs table exists')
+      setBriefs([])
+      setError('No design briefs data available. Check if design_briefs table exists and contains data.')
+    } catch (error) {
+      console.error('Error fetching design briefs:', error)
+      setError(`Failed to load design briefs: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      setBriefs([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadBriefs()
+  }, [loadBriefs])
+
+  const handleEditBrief = (brief: DesignBriefWithProject) => {
+    setEditingBrief(brief)
+    setShowEditModal(true)
+  }
+
+  const handleSaveBrief = async (briefData: Partial<DesignBrief>) => {
+    try {
+      if (editingBrief) {
+        // Update existing brief
+        const updatedBriefs = briefs.map(b => 
+          b.id === editingBrief.id 
+            ? { ...b, ...briefData, updated_at: new Date().toISOString() }
+            : b
+        )
+        setBriefs(updatedBriefs)
+        toast.success('Design brief updated successfully')
+      } else {
+        // Create new brief - this would typically call an API
+        const newBrief = {
+          ...briefData,
+          id: `brief-${Date.now()}`,
+          design_project_id: 'new-project',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        } as DesignBriefWithProject
+        
+        setBriefs([newBrief, ...briefs])
+        toast.success('Design brief created successfully')
+      }
+      
+      setShowEditModal(false)
+      setEditingBrief(null)
+    } catch (error) {
+      console.error('Error saving design brief:', error)
+      toast.error('Failed to save design brief')
+    }
+  }
+
+  const filteredBriefs = briefs.filter(brief => {
+    const matchesSearch = (brief.title || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         brief.project_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         brief.project_code?.toLowerCase().includes(searchTerm.toLowerCase())
+    
+    const briefStatus = getBriefStatus(brief)
+    const matchesStatus = statusFilter === 'all' || briefStatus === statusFilter
+    const matchesPriority = priorityFilter === 'all' || brief.project_priority === priorityFilter
+
+    return matchesSearch && matchesStatus && matchesPriority
+  })
+
+  const stats = {
+    total: briefs.length,
+    approved: briefs.filter(b => getBriefStatus(b) === 'approved').length,
+    draft: briefs.filter(b => getBriefStatus(b) === 'draft').length,
+    urgent: briefs.filter(b => b.project_priority === 'urgent').length
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900"></div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col space-y-4 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Design Briefs</h1>
+          <p className="text-gray-700">
+            Create and manage design briefs for your projects
+          </p>
+        </div>
+        <div className="flex items-center space-x-2">
+          <Button
+            onClick={loadBriefs}
+            disabled={loading}
+            variant="outline"
+            size="sm"
+          >
+            {loading ? 'Refreshing...' : 'Refresh'}
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              setEditingBrief(null)
+              setShowEditModal(true)
+            }}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            New Brief
+          </Button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="bg-amber-50 border border-amber-200 rounded-md p-4">
+          <div className="text-amber-800 text-sm">
+            <strong>Error:</strong> {error}
+          </div>
+        </div>
+      )}
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card className="border border-stone-200">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-700">Total Briefs</p>
+                <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
+              </div>
+              <FileText className="h-8 w-8 text-stone-600" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border border-stone-200">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-700">Approved</p>
+                <p className="text-2xl font-bold text-green-600">{stats.approved}</p>
+              </div>
+              <CheckCircle2 className="h-8 w-8 text-green-600" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border border-stone-200">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-700">Draft</p>
+                <p className="text-2xl font-bold text-yellow-600">{stats.draft}</p>
+              </div>
+              <Edit className="h-8 w-8 text-yellow-600" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border border-stone-200">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-700">Urgent</p>
+                <p className="text-2xl font-bold text-red-600">{stats.urgent}</p>
+              </div>
+              <AlertCircle className="h-8 w-8 text-red-600" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters */}
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex flex-col space-y-4 sm:flex-row sm:items-center sm:space-y-0 sm:space-x-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-700" />
+              <Input
+                placeholder="Search briefs, projects, or codes..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-8"
+              />
+            </div>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="All Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="draft">Draft</SelectItem>
+                <SelectItem value="approved">Approved</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="All Priority" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Priority</SelectItem>
+                <SelectItem value="urgent">Urgent</SelectItem>
+                <SelectItem value="high">High</SelectItem>
+                <SelectItem value="normal">Normal</SelectItem>
+                <SelectItem value="low">Low</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Briefs Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredBriefs.map((brief) => {
+          const briefStatus = getBriefStatus(brief)
+          
+          return (
+            <Card key={brief.id} className="hover:shadow-md transition-shadow">
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <CardTitle className="text-lg line-clamp-2">
+                      {brief.title}
+                    </CardTitle>
+                    <p className="text-sm text-gray-700 mt-1">
+                      {brief.project_name} • {brief.project_code}
+                    </p>
+                  </div>
+                  <div className="flex items-center space-x-2 ml-2">
+                    {brief.project_priority && (
+                      <div className={`w-2 h-2 rounded-full ${getPriorityColor(brief.project_priority).split(' ')[0]}`} />
+                    )}
+                    <Badge className={getBriefStatusColor(briefStatus)}>
+                      {briefStatus === 'approved' ? <CheckCircle2 className="h-3 w-3 mr-1" /> : <Clock className="h-3 w-3 mr-1" />}
+                      {briefStatus}
+                    </Badge>
+                  </div>
+                </div>
+              </CardHeader>
+              
+              <CardContent className="space-y-4">
+                <p className="text-sm text-gray-700 line-clamp-3">
+                  {brief.description}
+                </p>
+
+                <div className="space-y-3">
+                  {brief.target_market && (
+                    <div>
+                      <div className="text-xs font-medium text-gray-900 mb-1">Target Market</div>
+                      <p className="text-xs text-gray-700 line-clamp-2">{brief.target_market}</p>
+                    </div>
+                  )}
+
+                  {(brief.price_point_min || brief.price_point_max) && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-700">Price Range</span>
+                      <span className="text-xs font-medium">
+                        ${brief.price_point_min} - ${brief.price_point_max}
+                      </span>
+                    </div>
+                  )}
+
+                  {(brief.materials_preference || []).length > 0 && (
+                    <div>
+                      <div className="text-xs font-medium text-gray-900 mb-2">Materials</div>
+                      <div className="flex flex-wrap gap-1">
+                        {(brief.materials_preference || []).slice(0, 3).map((material, index) => (
+                          <Badge key={index} variant="secondary" className="text-xs">
+                            {material}
+                          </Badge>
+                        ))}
+                        {(brief.materials_preference || []).length > 3 && (
+                          <Badge variant="secondary" className="text-xs">
+                            +{(brief.materials_preference || []).length - 3}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between text-xs text-gray-600 pt-2 border-t">
+                    <div className="flex items-center space-x-1">
+                      <Calendar className="h-3 w-3" />
+                      <span>{new Date(brief.created_at).toLocaleDateString()}</span>
+                    </div>
+                    {brief.designer_name && (
+                      <div className="flex items-center space-x-1">
+                        <User className="h-3 w-3" />
+                        <span className="truncate max-w-20">{brief.designer_name}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end space-x-2 pt-4 border-t">
+                  <Link href={`/dashboard/design-briefs/${brief.id}`}>
+                    <Button size="sm" variant="outline">
+                      <Eye className="h-4 w-4 mr-1" />
+                      View
+                    </Button>
+                  </Link>
+                  <Button 
+                    size="sm" 
+                    variant="outline"
+                    onClick={() => handleEditBrief(brief)}
+                  >
+                    <Edit className="h-4 w-4 mr-1" />
+                    Edit
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
+
+      {filteredBriefs.length === 0 && (
+        <Card>
+          <CardContent className="text-center py-12">
+            <AlertCircle className="mx-auto h-12 w-12 text-gray-400" />
+            <h3 className="mt-2 text-sm font-medium text-gray-900">No briefs found</h3>
+            <p className="mt-1 text-sm text-gray-600">
+              Try adjusting your search or filter criteria, or create your first design brief.
+            </p>
+            <div className="mt-6">
+              <Button
+                onClick={() => {
+                  setEditingBrief(null)
+                  setShowEditModal(true)
+                }}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Create Brief
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Design Brief Edit Modal */}
+      <DesignBriefEditModal
+        isOpen={showEditModal}
+        onClose={() => {
+          setShowEditModal(false)
+          setEditingBrief(null)
+        }}
+        brief={editingBrief}
+        onSave={handleSaveBrief}
+      />
+    </div>
+  )
+}

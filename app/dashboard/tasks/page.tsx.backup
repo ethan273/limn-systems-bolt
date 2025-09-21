@@ -1,0 +1,434 @@
+'use client';
+ 
+
+import { useState, useEffect, useCallback } from 'react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { 
+  AlertTriangle, 
+  Plus, 
+  CheckSquare, 
+  List, 
+  Grid3X3, 
+  Filter,
+  Users,
+  User
+} from 'lucide-react';
+import PageHeader from '@/components/shared/PageHeader';
+import TaskBoard from '@/components/tasks/TaskBoard';
+import TaskTableView from '@/components/tasks/TaskTableView';
+import TaskDetail from '@/components/tasks/TaskDetail';
+import CreateTaskModal from '@/components/tasks/CreateTaskModal';
+import { Task, TaskFilter } from '@/types/tasks';
+import { Badge } from '@/components/ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { useUsers } from '@/hooks/useUsers';
+
+export default function TasksPage() {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
+  const [activeTab, setActiveTab] = useState('all');
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const { userOptions, getUserDisplayName } = useUsers();
+  const [filters, setFilters] = useState<TaskFilter>({
+    status: 'all',
+    priority: 'all',
+    assignee: 'all',
+    project: 'all',
+    dateRange: 'all',
+    department: 'all',
+    visibility: 'all'
+  });
+
+  // Load tasks
+  const loadTasks = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const response = await fetch('/api/tasks', {
+        credentials: 'include',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const result = await response.json();
+      setTasks(result.data || []);
+    } catch (err) {
+      console.log('Tasks API error (expected if table does not exist):', err);
+      setError(err instanceof Error ? err.message : 'Failed to load tasks');
+      setTasks([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadTasks();
+  }, [loadTasks]);
+
+  // Filter tasks based on active tab and filters
+  const filteredTasks = tasks.filter(task => {
+    // Tab filtering
+    switch (activeTab) {
+      case 'my_tasks':
+        if (!task.assigned_to?.includes('current-user-id')) return false;
+        break;
+      case 'team':
+        if (task.visibility !== 'department' && task.visibility !== 'company') return false;
+        break;
+      case 'high_priority':
+        if (task.priority !== 'high' && task.priority !== 'urgent') return false;
+        break;
+      case 'overdue':
+        if (!task.due_date || new Date(task.due_date) >= new Date()) return false;
+        break;
+      case 'completed':
+        if (task.status !== 'done') return false;
+        break;
+    }
+
+    // Additional filters
+    if (filters.status !== 'all' && task.status !== filters.status) return false;
+    if (filters.priority !== 'all' && task.priority !== filters.priority) return false;
+    if (filters.assignee !== 'all' && !task.assigned_to?.includes(filters.assignee)) return false;
+    if (filters.department !== 'all' && task.department !== filters.department) return false;
+    if (filters.visibility !== 'all' && task.visibility !== filters.visibility) return false;
+
+    return true;
+  });
+
+  // Task actions
+  const handleTaskClick = (task: Task) => {
+    setSelectedTask(task);
+  };
+
+  const handleUpdateTask = async (taskId: string, updates: Partial<Task>) => {
+    try {
+      const response = await fetch(`/api/tasks/${taskId}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updates)
+      });
+
+      if (response.ok) {
+        setTasks(prev => prev.map(task => 
+          task.id === taskId ? { ...task, ...updates } : task
+        ));
+      }
+    } catch (err) {
+      console.error('Failed to update task:', err);
+    }
+  };
+
+  const handleCreateTask = async (taskData: Partial<Task>) => {
+    try {
+      // Map field names to match API expectations
+      const apiData = {
+        title: taskData.title,
+        description: taskData.description,
+        status: taskData.status,
+        priority: taskData.priority,
+        assignedTo: taskData.assigned_to, // Map to camelCase
+        dueDate: taskData.due_date, // Map to camelCase
+        projectId: taskData.project_id,
+        department: taskData.department,
+        visibility: taskData.visibility,
+        mentioned_users: taskData.mentioned_users,
+        task_type: taskData.task_type
+      };
+
+      const response = await fetch('/api/tasks', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(apiData)
+      });
+
+      if (response.ok) {
+        const newTask = await response.json();
+        setTasks(prev => [newTask.data, ...prev]); // Add to top of list
+        setShowCreateModal(false);
+        // Show success feedback
+        console.log('Task created successfully:', newTask.data.title);
+      } else {
+        const errorData = await response.json();
+        console.error('Failed to create task:', errorData);
+        alert(`Failed to create task: ${errorData.error || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Failed to create task:', err);
+      alert('Failed to create task. Please try again.');
+    }
+  };
+
+  // Get task counts for tabs
+  const taskCounts = {
+    all: tasks.length,
+    my_tasks: tasks.filter(t => t.assigned_to?.includes('current-user-id')).length,
+    team: tasks.filter(t => t.visibility === 'department' || t.visibility === 'company').length,
+    high_priority: tasks.filter(t => t.priority === 'high' || t.priority === 'urgent').length,
+    overdue: tasks.filter(t => t.due_date && new Date(t.due_date) < new Date()).length,
+    completed: tasks.filter(t => t.status === 'done').length
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading tasks...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8">
+      <PageHeader 
+        title="Tasks"
+        description="Manage and track project tasks, assignments, and team collaboration"
+        actions={
+          <div className="flex gap-2">
+            <Select value={filters.department} onValueChange={(value) => setFilters(prev => ({ ...prev, department: value }))}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="Department" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Departments</SelectItem>
+                <SelectItem value="design">Design</SelectItem>
+                <SelectItem value="production">Production</SelectItem>
+                <SelectItem value="sales">Sales</SelectItem>
+                <SelectItem value="admin">Admin</SelectItem>
+                <SelectItem value="finance">Finance</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button onClick={() => setShowCreateModal(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              New Task
+            </Button>
+          </div>
+        }
+      />
+
+      {/* Error State */}
+      {error && (
+        <Alert>
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            <div className="space-y-2">
+              <div className="font-semibold">Tasks System Status</div>
+              <p>The tasks table may not exist in your database yet. Error: {error}</p>
+              <div className="bg-gray-50 rounded-lg p-4 text-left">
+                <p className="text-sm font-medium text-gray-700 mb-2">To enable tasks, create the table in your Supabase dashboard:</p>
+                <code className="text-xs text-gray-700 font-mono whitespace-pre-wrap">{`CREATE TABLE tasks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title VARCHAR(255) NOT NULL,
+  description TEXT,
+  status VARCHAR(50) DEFAULT 'todo',
+  priority VARCHAR(50) DEFAULT 'medium',
+  assigned_to TEXT[],
+  created_by VARCHAR(255) NOT NULL,
+  due_date TIMESTAMP WITH TIME ZONE,
+  project_id VARCHAR(255),
+  department VARCHAR(50) DEFAULT 'admin',
+  visibility VARCHAR(50) DEFAULT 'company',
+  task_type VARCHAR(50) DEFAULT 'task',
+  tags TEXT[],
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);`}</code>
+              </div>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <div className="flex items-center justify-between mb-6">
+          <TabsList className="grid w-full grid-cols-6 lg:w-auto">
+            <TabsTrigger value="all" className="flex items-center gap-2">
+              <CheckSquare className="h-4 w-4" />
+              All
+              <Badge variant="secondary">{taskCounts.all}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="my_tasks" className="flex items-center gap-2">
+              <User className="h-4 w-4" />
+              My Tasks
+              <Badge variant="secondary">{taskCounts.my_tasks}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="team" className="flex items-center gap-2">
+              <Users className="h-4 w-4" />
+              Team
+              <Badge variant="secondary">{taskCounts.team}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="high_priority" className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4" />
+              High Priority
+              <Badge variant="destructive">{taskCounts.high_priority}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="overdue" className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4" />
+              Overdue
+              <Badge variant="destructive">{taskCounts.overdue}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="completed" className="flex items-center gap-2">
+              <CheckSquare className="h-4 w-4" />
+              Completed
+              <Badge variant="outline">{taskCounts.completed}</Badge>
+            </TabsTrigger>
+          </TabsList>
+
+          {/* View Mode Toggle */}
+          <div className="flex gap-1 border rounded-lg p-1">
+            <Button
+              variant={viewMode === 'kanban' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setViewMode('kanban')}
+            >
+              <Grid3X3 className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={viewMode === 'list' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setViewMode('list')}
+            >
+              <List className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+
+        <TabsContent value={activeTab} className="space-y-4">
+          {/* Additional Filters */}
+          <div className="flex gap-2 items-center">
+            <Filter className="h-4 w-4 text-gray-500" />
+            <Select value={filters.status} onValueChange={(value) => setFilters(prev => ({ ...prev, status: value }))}>
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="todo">To Do</SelectItem>
+                <SelectItem value="in_progress">In Progress</SelectItem>
+                <SelectItem value="blocked">Blocked</SelectItem>
+                <SelectItem value="review">Review</SelectItem>
+                <SelectItem value="done">Done</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={filters.priority} onValueChange={(value) => setFilters(prev => ({ ...prev, priority: value }))}>
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Priority</SelectItem>
+                <SelectItem value="urgent">Urgent</SelectItem>
+                <SelectItem value="high">High</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="low">Low</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={filters.assignee} onValueChange={(value) => setFilters(prev => ({ ...prev, assignee: value }))}>
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Assignees</SelectItem>
+                {userOptions.map(user => (
+                  <SelectItem key={user.value} value={user.value}>
+                    {getUserDisplayName(user.value)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={filters.visibility} onValueChange={(value) => setFilters(prev => ({ ...prev, visibility: value }))}>
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Visibility</SelectItem>
+                <SelectItem value="private">Private</SelectItem>
+                <SelectItem value="department">Department</SelectItem>
+                <SelectItem value="company">Company</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Main Content */}
+          {filteredTasks.length === 0 && !error ? (
+            <div className="text-center py-12">
+              <CheckSquare className="mx-auto h-12 w-12 text-gray-400" />
+              <h3 className="mt-2 text-sm font-medium text-gray-900">No tasks found</h3>
+              <p className="mt-1 text-sm text-gray-500">Get started by creating your first task.</p>
+              <Button onClick={() => setShowCreateModal(true)} className="mt-4">
+                <Plus className="h-4 w-4 mr-2" />
+                Create Task
+              </Button>
+            </div>
+          ) : (
+            <>
+              {viewMode === 'kanban' && (
+                <TaskBoard 
+                  tasks={filteredTasks}
+                  onTaskClick={handleTaskClick}
+                  onUpdateTask={handleUpdateTask}
+                />
+              )}
+              
+              {viewMode === 'list' && (
+                <TaskTableView 
+                  tasks={filteredTasks}
+                  onTaskClick={handleTaskClick}
+                  onUpdateTask={handleUpdateTask}
+                />
+              )}
+            </>
+          )}
+        </TabsContent>
+      </Tabs>
+
+      {/* Task Detail Modal */}
+      {selectedTask && (
+        <TaskDetail
+          task={selectedTask}
+          onClose={() => setSelectedTask(null)}
+          onUpdate={(taskId: string, updates: Partial<Task>) => {
+            handleUpdateTask(taskId, updates);
+            setSelectedTask({ ...selectedTask, ...updates });
+          }}
+        />
+      )}
+
+      {/* Create Task Modal */}
+      {showCreateModal && (
+        <CreateTaskModal
+          onClose={() => setShowCreateModal(false)}
+          onCreate={handleCreateTask}
+        />
+      )}
+    </div>
+  );
+}
