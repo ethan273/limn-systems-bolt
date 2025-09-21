@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { protectDashboardRoute } from '@/middleware/auth'
 
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname
@@ -16,7 +15,8 @@ export async function middleware(request: NextRequest) {
     '/_next',
     '/favicon.ico',
     '/api/auth/callback',
-    '/auth'
+    '/auth',
+    '/portal/login'
   ]
   
   // Allow public routes
@@ -32,12 +32,31 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next()
   }
   
-  // Protect dashboard routes
+  // Simple dashboard protection - check for auth cookie
   if (path.startsWith('/dashboard')) {
-    console.log('Middleware: Checking dashboard route protection:', path)
-    const protectionResult = await protectDashboardRoute(request, path)
-    if (protectionResult) {
-      return protectionResult // Redirect to login or access denied
+    console.log('Middleware: Checking dashboard route:', path)
+    
+    // Get the auth cookie
+    const token = request.cookies.get('sb-auth-token')
+    
+    // If no token, redirect to login
+    if (!token) {
+      console.log('Middleware: No auth token, redirecting to login')
+      return NextResponse.redirect(new URL('/auth', request.url))
+    }
+  }
+  
+  // Simple portal protection - check for portal auth cookie
+  if (path.startsWith('/portal') && !path.startsWith('/portal/login')) {
+    console.log('Middleware: Checking portal route:', path)
+    
+    // Get the portal auth cookie
+    const portalToken = request.cookies.get('sb-portal-token')
+    
+    // If no token, redirect to portal login
+    if (!portalToken) {
+      console.log('Middleware: No portal token, redirecting to portal login')
+      return NextResponse.redirect(new URL('/portal/login', request.url))
     }
   }
   
@@ -60,5 +79,4 @@ export const config = {
      */
     '/((?!_next/static|_next/image|favicon.ico).*)',
   ],
-  runtime: 'nodejs',
 }
